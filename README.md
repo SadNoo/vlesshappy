@@ -1,6 +1,6 @@
 # vlesshappy
 
-- 状态：`0.2.0-rc.1 IMPLEMENTED / 本轮按要求未测试`
+- 状态：`0.2.0-rc.1 IMPLEMENTED / Docker 编译已通过 / 完整验收未执行`
 - 文档基线日期：`2026-08-19`
 - 实施版本：`0.2.0-rc.1`
 - 对应远程仓库：`https://github.com/SadNoo/vlesshappy`
@@ -23,7 +23,7 @@
 - 独立 `?vless=1` 与第一方混合 `links`/`mihomo` overlay；`mu=2`/`mu=4` 不注入 VLESS；
 - 非 root、无 shell 的 scratch 容器构建。
 
-## 后续验收入口（本轮未执行）
+## 后续验收入口（完整门禁尚未执行）
 
 ```bash
 cd vlesshappy
@@ -79,6 +79,7 @@ sh panel-overlay/apply.sh --check
 15. [14-release-gates.md](docs/14-release-gates.md)：SBOM、漏洞、签名、许可证和正式发布门禁。
 16. [15-change-manifest-020rc1.md](docs/15-change-manifest-020rc1.md)：本次全部变更清单。
 17. [16-sspanel-deferred-integration.md](docs/16-sspanel-deferred-integration.md)：SSPanel 延后集成边界与订阅契约。
-18. [REFERENCES.md](docs/REFERENCES.md)：父项目代码依据和上游官方资料。
+18. [17-docker-image-1.0.md](docs/17-docker-image-1.0.md)：`sadno/vle:1.0` 构建、摘要、兼容边界和剩余工作。
+19. [REFERENCES.md](docs/REFERENCES.md)：父项目代码依据和上游官方资料。
 
-架构决策均已由项目负责人确认。面板实际文件尚待项目负责人另行提供；数据库迁移、远程 Git、镜像发布、签名和上线仍分别需要明确授权。
+架构决策均已由项目负责人确认。面板实际文件尚待项目负责人另行提供；后续数据库迁移、正式签名、上线及新一轮远程发布仍分别需要明确授权。
