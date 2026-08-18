@@ -1,0 +1,146 @@
+diff --git a/app/Controllers/LinkController.php b/app/Controllers/LinkController.php
+--- a/app/Controllers/LinkController.php
++++ b/app/Controllers/LinkController.php
+@@ -10,5 +10,6 @@ use App\Utils\Tools;
+ use App\Utils\URL;
+ use App\Services\SS2022;
++use App\Services\VlessReality;
+ 
+ /**
+  *  HomeController
+@@ -78,8 +80,17 @@ class LinkController extends BaseController
+         $isSS2022 = isset($request->getQueryParams()['ss2022'])
+             && (string)$request->getQueryParams()['ss2022'] === '1';
+ 
++        $server = $request->getServerParams();
++        $queryString = isset($server['QUERY_STRING']) ? (string)$server['QUERY_STRING'] : '';
++        $isVless = isset($request->getQueryParams()['vless'])
++            && (string)$request->getQueryParams()['vless'] === '1'
++            && preg_match_all('/(?:^|&)vless=/', $queryString) === 1
++            && !$isSS2022;
++
+         $newResponse = $response->withHeader('Content-type', ' application/octet-stream; charset=utf-8')->withHeader('Cache-Control', 'no-store, no-cache, must-revalidate')->withHeader('Content-Disposition', ' attachment; filename=' . $token . '.txt');
+-        $content = $isSS2022 ? SS2022::v2rayNSubscription($user) : self::GetSSRSub($user, $mu);
++        $content = $isVless
++            ? VlessReality::subscription($user)
++            : ($isSS2022 ? SS2022::v2rayNSubscription($user) : self::GetSSRSub($user, $mu));
+         $newResponse->getBody()->write($content);
+         return $newResponse;
+     }
+diff --git a/app/Services/ClientConfig.php b/app/Services/ClientConfig.php
+--- a/app/Services/ClientConfig.php
++++ b/app/Services/ClientConfig.php
+@@ -4,6 +4,7 @@ namespace App\Services;
+ 
+ use App\Models\User;
+ use App\Utils\URL;
++use InvalidArgumentException;
+ 
+ /**
+  * Builds native-client subscriptions without exposing an external controller.
+@@ -83,5 +84,12 @@ class ClientConfig
+         foreach (SS2022::nodesForUser($user) as $node) {
+             $links[] = SS2022::sip002Link($user, $node);
+         }
++        foreach (VlessReality::nodesForUser($user) as $node) {
++            try {
++                $links[] = VlessReality::link($user, $node);
++            } catch (InvalidArgumentException $exception) {
++                // Skip malformed nodes without hiding valid protocols.
++            }
++        }
+         return implode("\n", $links) . (count($links) > 0 ? "\n" : '');
+     }
+@@ -139,5 +147,13 @@ class ClientConfig
+             $proxies[] = SS2022::mihomoProxy($user, $node);
+         }
+ 
++        foreach (VlessReality::nodesForUser($user) as $node) {
++            try {
++                $proxies[] = VlessReality::mihomoProxy($user, $node);
++            } catch (InvalidArgumentException $exception) {
++                // Skip malformed nodes without hiding valid protocols.
++            }
++        }
++
+         return self::uniqueNames($proxies);
+     }
+diff --git a/app/Controllers/Client/ClientApiV1Controller.php b/app/Controllers/Client/ClientApiV1Controller.php
+--- a/app/Controllers/Client/ClientApiV1Controller.php
++++ b/app/Controllers/Client/ClientApiV1Controller.php
+@@ -31,6 +31,10 @@ class ClientApiV1Controller extends BaseController
+                 'update_interval_minutes' => 60,
+                 'ss2022_single_port' => true,
+                 'ss2022_method' => '2022-blake3-aes-256-gcm',
++                'vless_reality' => true,
++                'vless_transport' => 'raw',
++                'vless_flow' => 'xtls-rprx-vision',
++                'vless_udp' => 'xudp',
+             ),
+         ));
+     }
+diff --git a/app/Models/Node.php b/app/Models/Node.php
+--- a/app/Models/Node.php
++++ b/app/Models/Node.php
+@@ -127,6 +127,6 @@ class Node extends Model
+             return false;
+         }
+ 
+-        if (!in_array($this->attributes['sort'], [0, 7, 8, 10, 11, 12, 13, 14])) {
++        if (!in_array($this->attributes['sort'], [0, 7, 8, 10, 11, 12, 13, 14, 15])) {
+             return null;
+         }
+diff --git a/app/Controllers/UserController.php b/app/Controllers/UserController.php
+--- a/app/Controllers/UserController.php
++++ b/app/Controllers/UserController.php
+@@ -46,5 +46,6 @@
+ use App\Utils\URL;
+ use App\Utils\DatatablesHelper;
+ use App\Services\Mail;
+ use App\Services\SS2022;
++use App\Services\VlessReality;
+ 
+@@ -80,5 +81,9 @@ class UserController extends BaseController
+                 'ss2022_sub_url',
+                 Config::get('subUrl') . $ssr_sub_token . '?ss2022=1'
+             )
++            ->assign(
++                'vless_sub_url',
++                Config::get('subUrl') . $ssr_sub_token . '?vless=1'
++            )
+             ->assign('display_ios_class', Config::get('display_ios_class'))
+             ->assign('display_ios_topup', Config::get('display_ios_topup'))
+@@ -484,7 +489,9 @@ class UserController extends BaseController
+             $array_node['class'] = $node->node_class;
+             $array_node['name'] = $node->name;
+             if ($node->sort == SS2022::NODE_SORT) {
+                 $array_node['server'] = SS2022::publicEndpoint($node);
++            } elseif ($node->sort == VlessReality::NODE_SORT) {
++                $array_node['server'] = VlessReality::publicEndpoint($node);
+             } elseif ($node->sort == 13) {
+                 $server = Tools::ssv2Array($node->server);
+                 $array_node['server'] = $server['add'];
+@@ -497,7 +504,7 @@ class UserController extends BaseController
+             $array_node['mu_only'] = $node->mu_only;
+             $array_node['group'] = $node->node_group;
+ 
+-            if ($node->sort == SS2022::NODE_SORT) {
++            if ($node->sort == SS2022::NODE_SORT || $node->sort == VlessReality::NODE_SORT) {
+                 $safeNode = clone $node;
+                 $safeNode->server = $array_node['server'];
+                 $array_node['raw_node'] = $safeNode;
+@@ -532,4 +539,4 @@ class UserController extends BaseController
+             $node_heartbeat = $node->node_heartbeat + 300;
+             $array_node['online'] = -1;
+-            if (!in_array($sort, array(0, 7, 8, 10, 11, 12, 13, 14)) || $node_heartbeat == 300 ) {
++            if (!in_array($sort, array(0, 7, 8, 10, 11, 12, 13, 14, 15)) || $node_heartbeat == 300 ) {
+                 $array_node['online'] = 0;
+diff --git a/resources/views/material/user/index.tpl b/resources/views/material/user/index.tpl
+--- a/resources/views/material/user/index.tpl
++++ b/resources/views/material/user/index.tpl
+@@ -412,4 +412,5 @@
+                                                 <button class="copy-text btn btn-subscription" type="button" data-clipboard-text="{$ssd_url_all}">点击复制全部 SSD 节点链接</button>
+                                                 <button class="copy-text btn btn-subscription" type="button" data-clipboard-text="{$ss_url_all}">点击复制全部 SS 节点链接</button>
+                                                 <button class="copy-text btn btn-subscription" type="button" data-clipboard-text="{$ss2022_sub_url}">点击复制 SS2022 订阅</button>
++                                                <button class="copy-text btn btn-subscription" type="button" data-clipboard-text="{$vless_sub_url}">点击复制 VLESS REALITY 订阅</button>
+                                                 

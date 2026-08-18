@@ -1,0 +1,7 @@
+/dist/
+/state/
+/.cache/
+*.key
+*.pem
+*.env
+*.out

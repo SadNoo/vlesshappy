@@ -1,0 +1,33 @@
+{
+  "node_id": 15,
+  "listen": "0.0.0.0:8443",
+  "state_dir": "/var/lib/vlesshappy",
+  "reality_private_key_file": "/run/secrets/vlesshappy_reality_private_key",
+  "database": {
+    "address": "db.example.com:3306",
+    "name": "sspanel",
+    "username": "vlesshappy",
+    "password_file": "/run/secrets/vlesshappy_database_password",
+    "tls_mode": "verify_ca",
+    "ca_file": "/run/secrets/mysql_ca.pem",
+    "server_name": "db.example.com",
+    "max_open": 4,
+    "max_idle": 2
+  },
+  "intervals": {
+    "auth_refresh_seconds": 60,
+    "report_seconds": 60,
+    "auth_stale_seconds": 3600,
+    "shutdown_seconds": 120
+  },
+  "limits": {
+    "tcp_per_user": 800,
+    "tcp_global": 3000,
+    "concurrent_handshakes": 1024,
+    "xudp_per_user": 128,
+    "xudp_global": 2048,
+    "dns_resolve_timeout_seconds": 10
+  },
+  "outbox_max_bytes": 1073741824,
+  "log_level": "info"
+}

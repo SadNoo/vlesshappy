@@ -1,0 +1,11 @@
+.git
+.github
+docs
+integration
+migrations
+packaging
+panel-overlay
+scripts
+testdata
+*.md
+Dockerfile

@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "frozen_at": "2026-08-19",
+  "clients": [
+    {
+      "name": "v2rayN",
+      "version": "7.24.2",
+      "platforms": ["windows-amd64", "linux-amd64", "macos-arm64"],
+      "source": "https://github.com/2dust/v2rayN/releases/tag/7.24.2",
+      "format": "vless-uri",
+      "status": "not_run"
+    },
+    {
+      "name": "v2rayNG",
+      "version": "2.2.6",
+      "core_version": "Xray-core v26.6.27",
+      "platforms": ["android-arm64"],
+      "source": "https://github.com/2dust/v2rayNG/releases/tag/2.2.6",
+      "artifact": "v2rayNG_2.2.6_arm64-v8a.apk",
+      "sha256": "62b0675c0986a8613f1bb67f1a68c366c6357e04a68687a3bd907170594c437d",
+      "format": "vless-uri",
+      "status": "not_run"
+    },
+    {
+      "name": "Mihomo",
+      "version": "1.19.28",
+      "platforms": ["linux-amd64", "windows-amd64", "macos-arm64"],
+      "source": "https://github.com/MetaCubeX/mihomo/releases/tag/v1.19.28",
+      "format": "mihomo-yaml",
+      "status": "not_run"
+    },
+    {
+      "name": "first-party-client",
+      "version": null,
+      "platforms": ["ios", "android", "macos", "windows", "linux"],
+      "source": "project-owner-supplied",
+      "format": "links-and-mihomo",
+      "status": "blocked_waiting_for_client_files"
+    }
+  ]
+}
