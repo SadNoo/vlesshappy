@@ -22,7 +22,6 @@ import (
 type runtimeState struct {
 	cfg          config.Config
 	db           *database.DB
-	store        *accounting.Store
 	engine       *xrayadapter.Engine
 	privateKey   []byte
 	started      time.Time
@@ -117,11 +116,6 @@ func bootstrap(ctx context.Context, cfg config.Config, logger *slog.Logger) (*ru
 	if err != nil {
 		return fail(err)
 	}
-	store, err := accounting.Open(cfg.StateDir, cfg.NodeID, cfg.OutboxMaxBytes)
-	if err != nil {
-		db.Close()
-		return fail(err)
-	}
 	checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	if err := db.Ping(checkCtx); err != nil {
@@ -129,12 +123,8 @@ func bootstrap(ctx context.Context, cfg config.Config, logger *slog.Logger) (*ru
 		return fail(fmt.Errorf("database ping: %w", err))
 	}
 	state := &runtimeState{
-		cfg: cfg, db: db, store: store, privateKey: privateKey, started: time.Now(),
+		cfg: cfg, db: db, privateKey: privateKey, started: time.Now(),
 		lastAuth: time.Now(), lastRejected: make(map[string]uint64), logger: logger,
-	}
-	if err := state.replay(checkCtx); err != nil {
-		db.Close()
-		return fail(fmt.Errorf("replay outbox: %w", err))
 	}
 	snapshot, warnings, err := db.LoadSnapshot(checkCtx, cfg.NodeID)
 	if err != nil {
@@ -158,32 +148,17 @@ func (s *runtimeState) report(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := s.persist(entries, s.engine.Snapshot()); err != nil {
-		if !accounting.WasPublished(err) {
-			s.engine.Restore(entries)
-		}
-		return fmt.Errorf("persist traffic: %w", err)
-	}
 	dbCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	if err := s.replay(dbCtx); err != nil {
-		s.logger.Warn("outbox replay deferred", "component", "accounting", "event", "database_unavailable", "error", err, "node_id", s.cfg.NodeID)
+	if err := s.applyTraffic(dbCtx, entries, s.engine.Snapshot()); err != nil {
+		s.engine.Restore(entries)
+		s.logger.Warn("traffic report deferred", "component", "accounting", "event", "database_unavailable", "error", err, "node_id", s.cfg.NodeID)
 	}
 	online := xrayadapter.FlattenOnline(s.engine.Online())
 	metrics := s.engine.SessionMetrics()
 	s.logSessionMetrics(metrics)
 	if err := s.db.ReportTelemetry(dbCtx, s.cfg.NodeID, online, time.Since(s.started), systemLoad(metrics)); err != nil {
 		s.logger.Warn("telemetry deferred", "component", "telemetry", "event", "database_unavailable", "error", err, "node_id", s.cfg.NodeID)
-	}
-	used, err := s.store.Size()
-	if err != nil {
-		return err
-	}
-	if used >= s.cfg.OutboxMaxBytes {
-		return fmt.Errorf("outbox reached hard limit: %d bytes", used)
-	}
-	if used >= s.cfg.OutboxMaxBytes*8/10 {
-		s.logger.Warn("outbox above warning threshold", "component", "accounting", "event", "capacity_warning", "bytes", used, "node_id", s.cfg.NodeID)
 	}
 	return nil
 }
@@ -221,21 +196,19 @@ func (s *runtimeState) refresh(ctx context.Context) error {
 	if snapshot.Hash == s.engine.Snapshot().Hash {
 		return nil
 	}
-	return s.reload(snapshot)
+	return s.reload(dbCtx, snapshot)
 }
 
-func (s *runtimeState) reload(next model.Snapshot) error {
+func (s *runtimeState) reload(ctx context.Context, next model.Snapshot) error {
 	previous := s.engine.Snapshot()
 	if s.engine.CanApply(next) {
 		entries, err := s.engine.Drain()
 		if err != nil {
 			return err
 		}
-		if err := s.persist(entries, previous); err != nil {
-			if !accounting.WasPublished(err) {
-				s.engine.Restore(entries)
-			}
-			return fmt.Errorf("persist traffic before authorization update: %w", err)
+		if err := s.applyTraffic(ctx, entries, previous); err != nil {
+			s.engine.Restore(entries)
+			return fmt.Errorf("report traffic before authorization update: %w", err)
 		}
 		revoked, err := s.engine.Apply(next)
 		if err != nil {
@@ -248,18 +221,16 @@ func (s *runtimeState) reload(next model.Snapshot) error {
 	if closeErr != nil {
 		return closeErr
 	}
-	if err := s.persist(entries, previous); err != nil {
+	if err := s.applyTraffic(ctx, entries, previous); err != nil {
 		rollback, rollbackErr := xrayadapter.Start(previous, s.cfg, s.privateKey)
 		if rollbackErr == nil {
-			if !accounting.WasPublished(err) {
-				rollback.Restore(entries)
-			}
+			rollback.Restore(entries)
 			s.engine = rollback
 		}
 		if rollbackErr != nil {
-			return fmt.Errorf("persist traffic before reload failed (%v), rollback failed: %w", err, rollbackErr)
+			return fmt.Errorf("report traffic before reload failed (%v), rollback failed: %w", err, rollbackErr)
 		}
-		return fmt.Errorf("persist traffic before reload: %w", err)
+		return fmt.Errorf("report traffic before reload: %w", err)
 	}
 	engine, err := xrayadapter.Start(next, s.cfg, s.privateKey)
 	if err == nil {
@@ -275,39 +246,16 @@ func (s *runtimeState) reload(next model.Snapshot) error {
 	return fmt.Errorf("new Xray config rejected and rolled back: %w", err)
 }
 
-func (s *runtimeState) persist(entries []accounting.Entry, snapshot model.Snapshot) error {
-	if len(entries) == 0 {
-		return nil
-	}
-	batch, err := accounting.NewBatch(snapshot.Node.ID, snapshot.Node.ConfigurationVersion, snapshot.Node.TrafficRate, entries, time.Now())
-	if err != nil {
-		return err
-	}
-	return s.store.Save(batch)
-}
-
-func (s *runtimeState) replay(ctx context.Context) error {
-	files, err := s.store.List()
-	if err != nil {
-		return err
-	}
-	for _, file := range files {
-		if err := s.db.ApplyBatch(ctx, file.Batch); err != nil {
-			return err
-		}
-		if err := s.store.Remove(file.Path); err != nil {
-			return err
-		}
-	}
-	return nil
+func (s *runtimeState) applyTraffic(ctx context.Context, entries []accounting.Entry, snapshot model.Snapshot) error {
+	return s.db.ApplyTraffic(ctx, snapshot.Node.ID, snapshot.Node.TrafficRate, entries)
 }
 
 func (s *runtimeState) shutdown(ctx context.Context) error {
 	s.logger.Info("service draining", "component", "lifecycle", "event", "draining", "node_id", s.cfg.NodeID)
+	snapshot := s.engine.Snapshot()
 	entries, closeErr := s.engine.CloseAndDrain()
-	persistErr := s.persist(entries, s.engine.Snapshot())
-	replayErr := s.replay(ctx)
-	return errors.Join(closeErr, persistErr, replayErr)
+	reportErr := s.applyTraffic(ctx, entries, snapshot)
+	return errors.Join(closeErr, reportErr)
 }
 
 func systemLoad(metrics sessionregistry.Metrics) string {

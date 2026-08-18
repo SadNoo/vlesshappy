@@ -4,7 +4,6 @@ namespace App\Services;
 
 use App\Models\Node;
 use App\Models\User;
-use App\Models\VlessRealityNodeConfig;
 use InvalidArgumentException;
 
 class VlessReality
@@ -77,6 +76,65 @@ class VlessReality
         );
     }
 
+    public static function mihomoProxies(User $user)
+    {
+        if (!self::userIsActive($user)) {
+            return array();
+        }
+        $proxies = array();
+        foreach (self::nodesForUser($user) as $node) {
+            try {
+                $proxies[] = self::mihomoProxy($user, $node);
+            } catch (InvalidArgumentException $exception) {
+                // A malformed VLESS node must not break the mixed subscription.
+            }
+        }
+        return $proxies;
+    }
+
+    public static function singBoxOutbound(User $user, Node $node)
+    {
+        $config = self::configForNode($node);
+        return array(
+            'type' => 'vless',
+            'tag' => (string)$node->name,
+            'server' => (string)$config->public_host,
+            'server_port' => (int)$config->public_port,
+            'uuid' => $user->getUuid(),
+            'flow' => 'xtls-rprx-vision',
+            'packet_encoding' => 'xudp',
+            'tls' => array(
+                'enabled' => true,
+                'server_name' => (string)$config->server_name,
+                'utls' => array(
+                    'enabled' => true,
+                    'fingerprint' => 'chrome',
+                ),
+                'reality' => array(
+                    'enabled' => true,
+                    'public_key' => (string)$config->reality_public_key,
+                    'short_id' => (string)$config->short_id,
+                ),
+            ),
+        );
+    }
+
+    public static function singBoxOutbounds(User $user)
+    {
+        if (!self::userIsActive($user)) {
+            return array();
+        }
+        $outbounds = array();
+        foreach (self::nodesForUser($user) as $node) {
+            try {
+                $outbounds[] = self::singBoxOutbound($user, $node);
+            } catch (InvalidArgumentException $exception) {
+                // Keep valid protocols when one VLESS node is malformed.
+            }
+        }
+        return $outbounds;
+    }
+
     public static function subscription(User $user, $nodes = null)
     {
         if (!self::userIsActive($user)) {
@@ -101,31 +159,31 @@ class VlessReality
         if ((int)$node->sort !== self::NODE_SORT || (int)$node->type !== 1) {
             throw new InvalidArgumentException('节点不是可见的 VLESS REALITY 节点');
         }
-        $config = VlessRealityNodeConfig::find($node->id);
-        if ($config === null) {
-            throw new InvalidArgumentException('VLESS REALITY 节点缺少公开配置');
-        }
-        self::validateConfig(array(
-            'public_host' => $config->public_host,
-            'public_port' => $config->public_port,
-            'server_name' => $config->server_name,
-            'target' => $config->target,
-            'reality_public_key' => $config->reality_public_key,
-            'short_id' => $config->short_id,
-            'fingerprint' => $config->fingerprint,
-            'flow' => $config->flow,
-            'transport' => $config->transport,
-            'min_client_version' => $config->min_client_version,
-        ));
-        return $config;
+        return (object)self::parseServer((string)$node->server);
+    }
+
+    public static function emptyConfig()
+    {
+        return (object)array(
+            'public_host' => '',
+            'public_port' => 443,
+            'server_name' => '',
+            'target' => '',
+            'reality_public_key' => '',
+            'short_id' => '',
+            'fingerprint' => 'chrome',
+            'flow' => 'xtls-rprx-vision',
+            'transport' => 'raw',
+            'min_client_version' => '',
+        );
     }
 
     public static function requestConfig($request)
     {
-		$publicPort = trim((string)$request->getParam('vless_public_port'));
-		if ($publicPort === '' || !ctype_digit($publicPort)) {
-			throw new InvalidArgumentException('VLESS REALITY 公开端口必须是数字');
-		}
+        $publicPort = trim((string)$request->getParam('vless_public_port'));
+        if ($publicPort === '' || !ctype_digit($publicPort)) {
+            throw new InvalidArgumentException('VLESS REALITY 公开端口必须是数字');
+        }
         $config = array(
             'public_host' => trim((string)$request->getParam('vless_public_host')),
             'public_port' => (int)$publicPort,
@@ -142,25 +200,75 @@ class VlessReality
         return $config;
     }
 
-    public static function saveConfig($nodeId, array $config)
+    public static function encodeServer(array $config)
     {
-        $record = VlessRealityNodeConfig::find($nodeId);
-        if ($record === null) {
-            $record = new VlessRealityNodeConfig();
-            $record->node_id = (int)$nodeId;
-            $record->config_version = 1;
-        } else {
-            $record->config_version = (int)$record->config_version + 1;
+        self::validateConfig($config);
+        $options = array(
+            'sni=' . $config['server_name'],
+            'pbk=' . $config['reality_public_key'],
+            'sid=' . $config['short_id'],
+            'target=' . $config['target'],
+        );
+        if ($config['min_client_version'] !== '') {
+            $options[] = 'minver=' . $config['min_client_version'];
         }
-        foreach ($config as $key => $value) {
-            $record->{$key} = $value;
+        $server = $config['public_host'] . ';' . (int)$config['public_port']
+            . ';0;tcp;reality;' . implode('|', $options);
+        if (strlen($server) > 255) {
+            throw new InvalidArgumentException('VLESS REALITY 节点配置超过 ss_node.server 的 255 字节限制');
         }
-        $record->save();
+        return $server;
     }
 
-    public static function deleteConfig($nodeId)
+    public static function parseServer($server)
     {
-        VlessRealityNodeConfig::where('node_id', (int)$nodeId)->delete();
+        if ($server === '' || strlen($server) > 255) {
+            throw new InvalidArgumentException('VLESS REALITY 节点配置长度无效');
+        }
+        $parts = explode(';', $server);
+        if (count($parts) !== 6 || trim($parts[2]) !== '0'
+            || strtolower(trim($parts[3])) !== 'tcp'
+            || strtolower(trim($parts[4])) !== 'reality'
+        ) {
+            throw new InvalidArgumentException('VLESS REALITY 节点地址格式无效');
+        }
+        $port = trim($parts[1]);
+        if ($port === '' || !ctype_digit($port)) {
+            throw new InvalidArgumentException('VLESS REALITY 公开端口必须是数字');
+        }
+        $options = array();
+        foreach (explode('|', $parts[5]) as $raw) {
+            $pair = explode('=', $raw, 2);
+            if (count($pair) !== 2) {
+                throw new InvalidArgumentException('VLESS REALITY 节点选项格式无效');
+            }
+            $key = strtolower(trim($pair[0]));
+            if (!in_array($key, array('sni', 'pbk', 'sid', 'target', 'minver'), true)
+                || array_key_exists($key, $options)
+            ) {
+                throw new InvalidArgumentException('VLESS REALITY 节点包含未知或重复选项');
+            }
+            $options[$key] = trim($pair[1]);
+        }
+        foreach (array('sni', 'pbk', 'sid', 'target') as $required) {
+            if (!array_key_exists($required, $options)) {
+                throw new InvalidArgumentException('VLESS REALITY 节点缺少必要选项');
+            }
+        }
+        $config = array(
+            'public_host' => trim($parts[0]),
+            'public_port' => (int)$port,
+            'server_name' => $options['sni'],
+            'target' => $options['target'],
+            'reality_public_key' => $options['pbk'],
+            'short_id' => strtolower($options['sid']),
+            'fingerprint' => 'chrome',
+            'flow' => 'xtls-rprx-vision',
+            'transport' => 'raw',
+            'min_client_version' => isset($options['minver']) ? $options['minver'] : '',
+        );
+        self::validateConfig($config);
+        return $config;
     }
 
     public static function publicEndpoint(Node $node)
@@ -208,8 +316,10 @@ class VlessReality
         ) {
             throw new InvalidArgumentException('首版只支持 chrome + Vision + RAW/TCP');
         }
-        if (strlen($config['min_client_version']) > 32) {
-            throw new InvalidArgumentException('最低客户端版本字段过长');
+        if (strlen($config['min_client_version']) > 32
+            || preg_match('/^[0-9.]*$/', $config['min_client_version']) !== 1
+        ) {
+            throw new InvalidArgumentException('最低客户端版本只能包含数字和点，且不得超过 32 字节');
         }
     }
 
@@ -224,11 +334,11 @@ class VlessReality
                 throw new InvalidArgumentException('REALITY target 必须是 host:port');
             }
             $host = substr($target, 0, $position);
-			$portText = substr($target, $position + 1);
-			if ($portText === '' || !ctype_digit($portText)) {
-				throw new InvalidArgumentException('REALITY target 端口无效');
-			}
-			$port = (int)$portText;
+            $portText = substr($target, $position + 1);
+            if ($portText === '' || !ctype_digit($portText)) {
+                throw new InvalidArgumentException('REALITY target 端口无效');
+            }
+            $port = (int)$portText;
         }
         self::validateHost($host, 'REALITY target');
         if ($port < 1 || $port > 65535) {

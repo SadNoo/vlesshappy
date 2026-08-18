@@ -28,6 +28,5 @@
     "xudp_global": 2048,
     "dns_resolve_timeout_seconds": 10
   },
-  "outbox_max_bytes": 1073741824,
   "log_level": "info"
 }

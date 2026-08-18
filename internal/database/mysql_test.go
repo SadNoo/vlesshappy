@@ -2,8 +2,49 @@ package database
 
 import (
 	"math"
+	"strings"
 	"testing"
+
+	"github.com/SadNoo/vlesshappy/internal/model"
 )
+
+const testPublicKey = "jUOUBrUHcUWzzDhp4L-6l3OwfjUhOajm8Y6yL6jU1zA"
+
+func TestParseVLESSServer(t *testing.T) {
+	var node model.Node
+	raw := "node.example.com;443;0;tcp;reality;sni=www.example.com|pbk=" + testPublicKey + "|sid=0123456789abcdef|target=www.example.com:443|minver=1.8.0"
+	if err := parseVLESSServer(raw, &node); err != nil {
+		t.Fatal(err)
+	}
+	if node.PublicHost != "node.example.com" || node.PublicPort != 443 ||
+		node.ServerName != "www.example.com" || node.RealityPublicKey != testPublicKey ||
+		node.ShortID != "0123456789abcdef" || node.Target != "www.example.com:443" ||
+		node.MinClientVersion != "1.8.0" || node.Flow != "xtls-rprx-vision" ||
+		node.Fingerprint != "chrome" || node.Transport != "raw" {
+		t.Fatalf("unexpected node: %#v", node)
+	}
+	node.ID = 15
+	node.TrafficRate = 1
+	if err := validateNode(node); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestParseVLESSServerRejectsInvalidInput(t *testing.T) {
+	valid := "node.example.com;443;0;tcp;reality;sni=www.example.com|pbk=" + testPublicKey + "|sid=|target=www.example.com:443"
+	for _, raw := range []string{
+		"node.example.com;443",
+		strings.Replace(valid, ";tcp;", ";ws;", 1),
+		valid + "|unknown=value",
+		strings.Replace(valid, "|target=", "|sni=duplicate|target=", 1),
+		strings.Repeat("a", 256),
+	} {
+		var node model.Node
+		if err := parseVLESSServer(raw, &node); err == nil {
+			t.Fatalf("invalid server was accepted: %q", raw)
+		}
+	}
+}
 
 func TestBilledTrafficUsesDocumentedRounding(t *testing.T) {
 	for _, fixture := range []struct {

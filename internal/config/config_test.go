@@ -32,7 +32,7 @@ func TestLoadStrictConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Intervals.AuthRefreshSeconds != 60 || cfg.OutboxMaxBytes != 1<<30 || cfg.Database.MaxOpen != 4 {
+	if cfg.Intervals.AuthRefreshSeconds != 60 || cfg.Database.MaxOpen != 4 {
 		t.Fatalf("defaults not applied: %#v", cfg)
 	}
 
