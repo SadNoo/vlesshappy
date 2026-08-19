@@ -9,10 +9,13 @@ COPY cmd ./cmd
 COPY internal ./internal
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -mod=vendor \
     -trimpath -ldflags="-s -w -buildid=" -o /out/vlesshappy ./cmd/vlesshappy
+RUN mkdir -p /out/data && chmod 0700 /out/data
 
 FROM scratch
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /out/vlesshappy /vlesshappy
+COPY --from=build --chown=65532:65532 /out/data /data
 USER 65532:65532
+VOLUME ["/data"]
 ENTRYPOINT ["/vlesshappy"]
-CMD ["run", "-config", "/etc/vlesshappy/config.json"]
+CMD ["run", "-config", "/data/runtime/config.json"]

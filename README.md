@@ -1,11 +1,13 @@
 # vlesshappy
 
-- 状态：`2.0.0 V2-COMPATIBLE DATABASE MODE / 待完成本轮验收`
+- 状态：`2.1.0 LOCAL IMAGE VALIDATED / SNI 与 TARGET 待单独确认`
 - 文档基线日期：`2026-08-19`
-- 实施版本：`2.0.0`
+- 实施版本：`2.1.0`
 - 对应远程仓库：`https://github.com/SadNoo/vlesshappy`
 
 `vlesshappy` 是 VLESS + RAW/TCP + REALITY + Vision + XUDP 多用户单端口后端，直接兼容本项目的 SSPanel 用户、节点、策略、倍率计费和状态表。2.0 按现有 V2 后端的数据库模式运行，不新增表、不修改现有表。
+
+2.1 在不改变协议、数据库或秘密边界的前提下增加镜像内置 `setup` 向导。首次部署使用 Docker 命名卷，向导隐藏读取数据库密码、生成 REALITY 密钥与 short ID、等待管理员保存面板节点、完成严格校验后原子生成运行目录；不再要求手写 JSON、宿主机 secret 文件或 UID 权限。
 
 ## 已实现
 
@@ -81,6 +83,8 @@ sh panel-overlay/apply.sh --check
 17. [16-sspanel-deferred-integration.md](docs/16-sspanel-deferred-integration.md)：SSPanel 延后集成边界与订阅契约。
 18. [17-docker-image-1.0.md](docs/17-docker-image-1.0.md)：`sadno/vle:1.0` 构建、摘要、兼容边界和剩余工作。
 19. [18-vle-2.0-v2-compatible-mode.md](docs/18-vle-2.0-v2-compatible-mode.md)：2.0 改造、SSPanel 文件清单、数据库边界和验收结果。
-20. [REFERENCES.md](docs/REFERENCES.md)：父项目代码依据和上游官方资料。
+20. [19-vle-2.1-secure-setup.md](docs/19-vle-2.1-secure-setup.md)：2.1 内置初始化向导、命名卷内容、部署和回滚边界。
+21. [20-vle-2.1-validation.md](docs/20-vle-2.1-validation.md)：2.1 测试、Docker 端到端、镜像内容和敏感信息检查记录。
+22. [REFERENCES.md](docs/REFERENCES.md)：父项目代码依据和上游官方资料。
 
 2.0 的 V2 兼容数据库模式已由项目负责人确认。面板实际文件仍需在部署前按 overlay 清单合并；2.0 没有数据库迁移。

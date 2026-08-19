@@ -1,5 +1,16 @@
 # 09. 构建、安装与运行
 
+## 2.1 推荐入口
+
+2.1 首次部署优先使用镜像内置向导；详细流程和数据卷内容见 [19-vle-2.1-secure-setup.md](19-vle-2.1-secure-setup.md)。向导只接收 SNI/target，不自动申请域名、部署伪装站点或推荐第三方 target。
+
+```bash
+docker volume create vle-node-data
+docker run --rm -it --read-only -v vle-node-data:/data sadno/vle:2.1 setup
+```
+
+完成面板保存和校验后，向导会按选择的公开端口输出最终 `docker run` 命令。下面的手工配置方式继续供 2.0 和 2.1 高级部署使用。
+
 ## 构建
 
 ```bash

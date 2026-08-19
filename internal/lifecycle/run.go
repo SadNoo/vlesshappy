@@ -65,33 +65,39 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 }
 
 func Validate(ctx context.Context, cfg config.Config) error {
+	_, err := ValidateSnapshot(ctx, cfg)
+	return err
+}
+
+func ValidateSnapshot(ctx context.Context, cfg config.Config) (model.Snapshot, error) {
+	var empty model.Snapshot
 	privateKey, err := config.ReadSecret(cfg.RealityPrivateKeyFile)
 	if err != nil {
-		return fmt.Errorf("REALITY secret: %w", err)
+		return empty, fmt.Errorf("REALITY secret: %w", err)
 	}
 	password, err := config.ReadSecret(cfg.Database.PasswordFile)
 	if err != nil {
-		return fmt.Errorf("database secret: %w", err)
+		return empty, fmt.Errorf("database secret: %w", err)
 	}
 	defer clear(password)
 	db, err := database.Open(cfg.Database, password)
 	if err != nil {
-		return err
+		return empty, err
 	}
 	defer db.Close()
 	checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	if err := db.Ping(checkCtx); err != nil {
-		return fmt.Errorf("database ping: %w", err)
+		return empty, fmt.Errorf("database ping: %w", err)
 	}
 	snapshot, _, err := db.LoadSnapshot(checkCtx, cfg.NodeID)
 	if err != nil {
-		return err
+		return empty, err
 	}
 	if _, err := xrayadapter.BuildConfig(snapshot, cfg.Listen, privateKey); err != nil {
-		return err
+		return empty, err
 	}
-	return nil
+	return snapshot, nil
 }
 
 func bootstrap(ctx context.Context, cfg config.Config, logger *slog.Logger) (*runtimeState, *stateLock, error) {

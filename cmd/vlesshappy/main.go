@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"crypto/ecdh"
 	"crypto/rand"
-	"encoding/base64"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -15,9 +13,11 @@ import (
 
 	"github.com/SadNoo/vlesshappy/internal/config"
 	"github.com/SadNoo/vlesshappy/internal/lifecycle"
+	"github.com/SadNoo/vlesshappy/internal/realitykey"
+	setupwizard "github.com/SadNoo/vlesshappy/internal/setup"
 )
 
-const version = "2.0.0"
+const version = "2.1.0"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -28,7 +28,7 @@ func main() {
 
 func run(args []string) error {
 	command := "run"
-	if len(args) > 0 && (args[0] == "run" || args[0] == "validate" || args[0] == "keygen" || args[0] == "version") {
+	if len(args) > 0 && (args[0] == "run" || args[0] == "validate" || args[0] == "keygen" || args[0] == "setup" || args[0] == "version") {
 		command = args[0]
 		args = args[1:]
 	}
@@ -38,6 +38,9 @@ func run(args []string) error {
 	}
 	if command == "keygen" {
 		return keygen(args)
+	}
+	if command == "setup" {
+		return setup(args)
 	}
 	flags := flag.NewFlagSet(command, flag.ContinueOnError)
 	configPath := flags.String("config", "/etc/vlesshappy/config.json", "absolute path to config JSON")
@@ -64,6 +67,28 @@ func run(args []string) error {
 	return lifecycle.Run(ctx, cfg, logger)
 }
 
+func setup(args []string) error {
+	flags := flag.NewFlagSet("setup", flag.ContinueOnError)
+	dataDir := flags.String("data-dir", "/data", "absolute persistent data directory")
+	volumeName := flags.String("volume-name", "vle-node-data", "Docker volume name shown in the run command")
+	containerName := flags.String("container-name", "vle-node", "Docker container name shown in the run command")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return fmt.Errorf("unexpected arguments: %v", flags.Args())
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return setupwizard.Run(ctx, setupwizard.Options{
+		DataDir: *dataDir, VolumeName: *volumeName, ContainerName: *containerName,
+		In: os.Stdin, Out: os.Stdout,
+		ReadPassword: func() ([]byte, error) {
+			return readHiddenPassword(os.Stdin, os.Stdout)
+		},
+	})
+}
+
 func keygen(args []string) error {
 	flags := flag.NewFlagSet("keygen", flag.ContinueOnError)
 	privatePath := flags.String("private-key-file", "", "absolute output path for the private key")
@@ -73,16 +98,15 @@ func keygen(args []string) error {
 	if flags.NArg() != 0 || *privatePath == "" || !filepath.IsAbs(*privatePath) {
 		return fmt.Errorf("keygen requires an absolute -private-key-file and no extra arguments")
 	}
-	key, err := ecdh.X25519().GenerateKey(rand.Reader)
+	privateText, publicText, err := realitykey.Generate(rand.Reader)
 	if err != nil {
-		return fmt.Errorf("generate X25519 key: %w", err)
+		return err
 	}
-	privateText := base64.RawURLEncoding.EncodeToString(key.Bytes()) + "\n"
 	file, err := os.OpenFile(*privatePath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("create private key file: %w", err)
 	}
-	if _, err := file.WriteString(privateText); err != nil {
+	if _, err := file.WriteString(privateText + "\n"); err != nil {
 		file.Close()
 		return fmt.Errorf("write private key file: %w", err)
 	}
@@ -93,7 +117,6 @@ func keygen(args []string) error {
 	if err := file.Close(); err != nil {
 		return fmt.Errorf("close private key file: %w", err)
 	}
-	publicText := base64.RawURLEncoding.EncodeToString(key.PublicKey().Bytes())
 	fmt.Println("REALITY public key:", publicText)
 	return nil
 }
