@@ -1,7 +1,6 @@
 package database
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
@@ -22,6 +21,7 @@ import (
 	gomysql "github.com/go-sql-driver/mysql"
 
 	"github.com/SadNoo/vlesshappy/internal/accounting"
+	"github.com/SadNoo/vlesshappy/internal/caddyservice"
 	"github.com/SadNoo/vlesshappy/internal/config"
 	"github.com/SadNoo/vlesshappy/internal/model"
 	"github.com/SadNoo/vlesshappy/internal/policy"
@@ -96,29 +96,27 @@ func (d *DB) Close() error                   { return d.sql.Close() }
 
 func (d *DB) LoadSnapshot(ctx context.Context, nodeID int64) (model.Snapshot, []string, error) {
 	var snapshot model.Snapshot
+	var server string
 	row := d.sql.QueryRowContext(ctx, `
 SELECT n.id, n.name, n.traffic_rate, n.node_class, n.node_group,
        n.node_speedlimit, n.node_connector, n.node_bandwidth, n.node_bandwidth_limit,
-       c.public_host, c.public_port, c.server_name, c.target,
-       c.reality_public_key, c.short_id, c.fingerprint, c.flow, c.transport,
-       c.min_client_version, c.config_version
+       n.server
 FROM ss_node AS n
-JOIN vless_reality_node_config AS c ON c.node_id = n.id
 WHERE n.id = ? AND n.sort = 15 AND n.type = 1
   AND (n.node_bandwidth_limit = 0 OR n.node_bandwidth < n.node_bandwidth_limit)`, nodeID)
 	if err := row.Scan(
 		&snapshot.Node.ID, &snapshot.Node.Name, &snapshot.Node.TrafficRate,
 		&snapshot.Node.Class, &snapshot.Node.Group, &snapshot.Node.SpeedLimitMbps,
 		&snapshot.Node.ConnectorLimit, &snapshot.Node.Bandwidth, &snapshot.Node.BandwidthLimit,
-		&snapshot.Node.PublicHost, &snapshot.Node.PublicPort, &snapshot.Node.ServerName,
-		&snapshot.Node.Target, &snapshot.Node.RealityPublicKey, &snapshot.Node.ShortID,
-		&snapshot.Node.Fingerprint, &snapshot.Node.Flow, &snapshot.Node.Transport,
-		&snapshot.Node.MinClientVersion, &snapshot.Node.ConfigurationVersion,
+		&server,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return snapshot, nil, ErrNodeUnavailable
 		}
 		return snapshot, nil, fmt.Errorf("load node: %w", err)
+	}
+	if err := parseVLESSServer(server, &snapshot.Node); err != nil {
+		return snapshot, nil, fmt.Errorf("invalid ss_node.server: %w", err)
 	}
 	if err := validateNode(snapshot.Node); err != nil {
 		return snapshot, nil, err
@@ -187,8 +185,8 @@ func compileUser(id int64, password string, speed float64, connectors int, forbi
 }
 
 func validateNode(node model.Node) error {
-	if node.ID <= 0 || node.ConfigurationVersion == 0 || node.PublicPort < 1 || node.PublicPort > 65535 {
-		return errors.New("invalid node ID, version or public port")
+	if node.ID <= 0 || node.PublicPort < 1 || node.PublicPort > 65535 {
+		return errors.New("invalid node ID or public port")
 	}
 	if math.IsNaN(node.TrafficRate) || math.IsInf(node.TrafficRate, 0) || node.TrafficRate <= 0 || node.TrafficRate > 10000 {
 		return errors.New("invalid node traffic rate")
@@ -220,6 +218,66 @@ func validateNode(node model.Node) error {
 	if _, err := hex.DecodeString(node.ShortID); err != nil {
 		return errors.New("short_id must be hexadecimal")
 	}
+	if len(node.MinClientVersion) > 32 {
+		return errors.New("minver is too long")
+	}
+	for _, char := range node.MinClientVersion {
+		if (char < '0' || char > '9') && char != '.' {
+			return errors.New("minver must contain only digits and dots")
+		}
+	}
+	return nil
+}
+
+func parseVLESSServer(server string, node *model.Node) error {
+	if len(server) == 0 || len(server) > 255 {
+		return errors.New("configuration must contain 1 to 255 bytes")
+	}
+	parts := strings.Split(server, ";")
+	if len(parts) != 6 || strings.TrimSpace(parts[2]) != "0" ||
+		strings.ToLower(strings.TrimSpace(parts[3])) != "tcp" ||
+		strings.ToLower(strings.TrimSpace(parts[4])) != "reality" {
+		return errors.New("expected host;port;0;tcp;reality;options")
+	}
+	port, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err != nil || port < 1 || port > 65535 {
+		return errors.New("public port must be between 1 and 65535")
+	}
+	options := make(map[string]string)
+	for _, raw := range strings.Split(parts[5], "|") {
+		pair := strings.SplitN(raw, "=", 2)
+		if len(pair) != 2 {
+			return errors.New("invalid option")
+		}
+		key := strings.ToLower(strings.TrimSpace(pair[0]))
+		if key != "sni" && key != "pbk" && key != "sid" && key != "target" && key != "minver" {
+			return fmt.Errorf("unknown option %q", key)
+		}
+		if _, exists := options[key]; exists {
+			return fmt.Errorf("duplicate option %q", key)
+		}
+		options[key] = strings.TrimSpace(pair[1])
+	}
+	for _, required := range []string{"sni", "pbk", "sid"} {
+		if _, exists := options[required]; !exists {
+			return fmt.Errorf("missing option %q", required)
+		}
+	}
+	node.PublicHost = strings.TrimSpace(parts[0])
+	node.PublicPort = port
+	node.ServerName = options["sni"]
+	node.RealityPublicKey = options["pbk"]
+	node.ShortID = strings.ToLower(options["sid"])
+	node.Target, node.ManagedCaddy = options["target"], false
+	if _, exists := options["target"]; !exists {
+		node.Target, node.ManagedCaddy = caddyservice.RealityTarget, true
+	} else if node.Target == "" {
+		return errors.New("target must not be empty when present")
+	}
+	node.MinClientVersion = options["minver"]
+	node.Fingerprint = "chrome"
+	node.Flow = "xtls-rprx-vision"
+	node.Transport = "raw"
 	return nil
 }
 
@@ -259,42 +317,29 @@ func validateDNSName(value string) error {
 	return nil
 }
 
-func (d *DB) ApplyBatch(ctx context.Context, batch accounting.Batch) error {
-	hash, err := hex.DecodeString(batch.PayloadSHA256)
-	if err != nil || len(hash) != 32 {
-		return errors.New("invalid batch hash")
+func (d *DB) ApplyTraffic(ctx context.Context, nodeID int64, trafficRate float64, entries []accounting.Entry) error {
+	if nodeID <= 0 || math.IsNaN(trafficRate) || math.IsInf(trafficRate, 0) || trafficRate <= 0 || trafficRate > 10000 {
+		return errors.New("invalid traffic report metadata")
+	}
+	if len(entries) == 0 {
+		return nil
 	}
 	tx, err := d.sql.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, `
-INSERT INTO vless_traffic_batches
-  (batch_id, node_id, payload_sha256, created_at, applied_at)
-VALUES (?, ?, ?, ?, UNIX_TIMESTAMP())`, batch.ID, batch.NodeID, hash, batch.CreatedAt)
-	if err != nil {
-		var mysqlErr *gomysql.MySQLError
-		if !errors.As(err, &mysqlErr) || mysqlErr.Number != 1062 {
-			return fmt.Errorf("insert traffic batch: %w", err)
-		}
-		var storedNode int64
-		var storedHash []byte
-		if err := tx.QueryRowContext(ctx, `SELECT node_id, payload_sha256 FROM vless_traffic_batches WHERE batch_id = ?`, batch.ID).Scan(&storedNode, &storedHash); err != nil {
-			return fmt.Errorf("verify duplicate traffic batch: %w", err)
-		}
-		if storedNode != batch.NodeID || !bytes.Equal(storedHash, hash) {
-			return errors.New("traffic batch ID collision with different payload")
-		}
-		return nil
-	}
 	var rawTotal int64
-	for _, entry := range batch.Entries {
-		billedUp, err := billed(entry.Uplink, batch.TrafficRate)
+	for _, entry := range entries {
+		if entry.UserID <= 0 || entry.Uplink < 0 || entry.Downlink < 0 ||
+			entry.Uplink > math.MaxInt64-entry.Downlink || rawTotal > math.MaxInt64-entry.Uplink-entry.Downlink {
+			return errors.New("invalid or overflowing traffic entry")
+		}
+		billedUp, err := billed(entry.Uplink, trafficRate)
 		if err != nil {
 			return err
 		}
-		billedDown, err := billed(entry.Downlink, batch.TrafficRate)
+		billedDown, err := billed(entry.Downlink, trafficRate)
 		if err != nil {
 			return err
 		}
@@ -310,25 +355,28 @@ VALUES (?, ?, ?, ?, UNIX_TIMESTAMP())`, batch.ID, batch.NodeID, hash, batch.Crea
 			trafficText := humanBytes(billedUp + billedDown)
 			_, err = tx.ExecContext(ctx, `
 INSERT INTO user_traffic_log (user_id, u, d, node_id, rate, traffic, log_time)
-VALUES (?, ?, ?, ?, ?, ?, UNIX_TIMESTAMP())`, entry.UserID, entry.Uplink, entry.Downlink, batch.NodeID, batch.TrafficRate, trafficText)
+VALUES (?, ?, ?, ?, ?, ?, UNIX_TIMESTAMP())`, entry.UserID, entry.Uplink, entry.Downlink, nodeID, trafficRate, trafficText)
 			if err != nil {
 				return fmt.Errorf("insert user traffic log: %w", err)
 			}
 		}
-		if entry.Uplink > math.MaxInt64-entry.Downlink || rawTotal > math.MaxInt64-entry.Uplink-entry.Downlink {
-			return errors.New("raw traffic total overflow")
-		}
 		rawTotal += entry.Uplink + entry.Downlink
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE ss_node SET node_bandwidth = node_bandwidth + ? WHERE id = ?`, rawTotal, batch.NodeID)
+	result, err := tx.ExecContext(ctx, `UPDATE ss_node SET node_bandwidth = node_bandwidth + ?, node_heartbeat = UNIX_TIMESTAMP() WHERE id = ?`, rawTotal, nodeID)
 	if err != nil {
 		return fmt.Errorf("update node bandwidth: %w", err)
 	}
-	if affected, _ := result.RowsAffected(); affected != 1 {
-		return errors.New("node disappeared while applying traffic")
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		if err := requireNode(ctx, tx, nodeID, "applying traffic"); err != nil {
+			return err
+		}
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit traffic batch: %w", err)
+		return fmt.Errorf("commit traffic report: %w", err)
 	}
 	return nil
 }
@@ -384,8 +432,26 @@ func (d *DB) ReportTelemetry(ctx context.Context, nodeID int64, online map[int64
 	if err != nil {
 		return fmt.Errorf("update heartbeat: %w", err)
 	}
-	if affected, _ := result.RowsAffected(); affected != 1 {
-		return errors.New("node disappeared while reporting telemetry")
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		if err := requireNode(ctx, tx, nodeID, "reporting telemetry"); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
+}
+
+func requireNode(ctx context.Context, tx *sql.Tx, nodeID int64, operation string) error {
+	var existingID int64
+	err := tx.QueryRowContext(ctx, `SELECT id FROM ss_node WHERE id = ?`, nodeID).Scan(&existingID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("node disappeared while %s", operation)
+	}
+	if err != nil {
+		return fmt.Errorf("verify node while %s: %w", operation, err)
+	}
+	return nil
 }

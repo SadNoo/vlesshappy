@@ -4,7 +4,6 @@ namespace Illuminate\Database\Eloquent {
     class Model
     {
         protected $attributes = array();
-        public static $records = array();
 
         public function __get($key)
         {
@@ -15,12 +14,6 @@ namespace Illuminate\Database\Eloquent {
         {
             $this->attributes[$key] = $value;
         }
-
-        public static function find($id)
-        {
-            $class = get_called_class();
-            return isset(self::$records[$class][$id]) ? self::$records[$class][$id] : null;
-        }
     }
 }
 
@@ -28,14 +21,11 @@ namespace {
     require dirname(__DIR__, 3) . '/app/Models/Model.php';
     require dirname(__DIR__, 3) . '/app/Models/User.php';
     require dirname(__DIR__, 3) . '/app/Models/Node.php';
-    require dirname(__DIR__) . '/app/Models/VlessRealityNodeConfig.php';
     require dirname(__DIR__) . '/app/Services/VlessReality.php';
 
     use App\Models\Node;
     use App\Models\User;
-    use App\Models\VlessRealityNodeConfig;
     use App\Services\VlessReality;
-    use Illuminate\Database\Eloquent\Model as EloquentModel;
 
     class FixtureUser extends User
     {
@@ -58,20 +48,10 @@ namespace {
     $node->name = 'VLESS Test';
     $node->sort = 15;
     $node->type = 1;
-
-    $config = new VlessRealityNodeConfig();
-    $config->node_id = 15;
-    $config->public_host = '2001:db8::15';
-    $config->public_port = 443;
-    $config->server_name = 'www.example.com';
-    $config->target = 'www.example.com:443';
-    $config->reality_public_key = 'jUOUBrUHcUWzzDhp4L-6l3OwfjUhOajm8Y6yL6jU1zA';
-    $config->short_id = '0123456789abcdef';
-    $config->fingerprint = 'chrome';
-    $config->flow = 'xtls-rprx-vision';
-    $config->transport = 'raw';
-    $config->min_client_version = '';
-    EloquentModel::$records[VlessRealityNodeConfig::class][15] = $config;
+    $node->server = '2001:db8::15;443;0;tcp;reality;'
+        . 'sni=www.example.com|pbk=jUOUBrUHcUWzzDhp4L-6l3OwfjUhOajm8Y6yL6jU1zA'
+        . '|sid=0123456789abcdef|target=www.example.com:443|minver=1.8.0';
+    $config = VlessReality::configForNode($node);
 
     $link = VlessReality::link($user, $node);
     assertContains('vless://9af01be3-7b93-39b9-8fa0-40f7ad54eb71@[2001:db8::15]:443?', $link, 'IPv6 URI');
@@ -84,21 +64,39 @@ namespace {
     assertSame('xudp', $proxy['packet-encoding'], 'Mihomo XUDP');
     assertSame(true, $proxy['udp'], 'Mihomo UDP');
     assertSame($config->reality_public_key, $proxy['reality-opts']['public-key'], 'Mihomo public key');
-    assertSame(base64_encode($link . "\n"), VlessReality::subscription($user, array($node)), 'subscription');
 
-	$badRequest = new class {
-		public function getParam($name)
-		{
-			return $name === 'vless_public_port' ? '443junk' : '';
-		}
-	};
-	$rejected = false;
-	try {
-		VlessReality::requestConfig($badRequest);
-	} catch (\InvalidArgumentException $exception) {
-		$rejected = true;
-	}
-	assertSame(true, $rejected, 'strict public port');
+    $outbound = VlessReality::singBoxOutbound($user, $node);
+    assertSame('vless', $outbound['type'], 'sing-box type');
+    assertSame('xudp', $outbound['packet_encoding'], 'sing-box XUDP');
+    assertSame('xtls-rprx-vision', $outbound['flow'], 'sing-box Vision');
+    assertSame('chrome', $outbound['tls']['utls']['fingerprint'], 'sing-box fingerprint');
+    assertSame($config->reality_public_key, $outbound['tls']['reality']['public_key'], 'sing-box public key');
+    assertSame(base64_encode($link . "\n"), VlessReality::subscription($user, array($node)), 'subscription');
+    assertSame($node->server, VlessReality::encodeServer((array)$config), 'server round trip');
+
+    $badRequest = new class {
+        public function getParam($name)
+        {
+            return $name === 'vless_public_port' ? '443junk' : '';
+        }
+    };
+    $rejected = false;
+    try {
+        VlessReality::requestConfig($badRequest);
+    } catch (\InvalidArgumentException $exception) {
+        $rejected = true;
+    }
+    assertSame(true, $rejected, 'strict public port');
+
+    $badNode = clone $node;
+    $badNode->server = 'node.example.com;443';
+    $rejected = false;
+    try {
+        VlessReality::configForNode($badNode);
+    } catch (\InvalidArgumentException $exception) {
+        $rejected = true;
+    }
+    assertSame(true, $rejected, 'invalid server format');
 
     $user->enable = 0;
     assertSame('', VlessReality::subscription($user, array($node)), 'disabled user');

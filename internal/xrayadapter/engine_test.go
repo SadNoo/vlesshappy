@@ -23,9 +23,9 @@ func TestBuildConfigCompilesWithPinnedXray(t *testing.T) {
 	snapshot := model.Snapshot{
 		Node: model.Node{
 			ID: 15, Name: "test", TrafficRate: 1, PublicHost: "node.example.com",
-			PublicPort: 443, ServerName: "www.example.com", Target: "www.example.com:443",
+			PublicPort: 2053, ServerName: "www.example.com", Target: "127.0.0.1:9443", ManagedCaddy: true,
 			RealityPublicKey: publicText, ShortID: "0123456789abcdef", Fingerprint: "chrome",
-			Flow: "xtls-rprx-vision", Transport: "raw", ConfigurationVersion: 1,
+			Flow: "xtls-rprx-vision", Transport: "raw",
 		},
 		Users: []model.User{{
 			ID: 42, UUID: model.UUIDv3(42, "test-only"),

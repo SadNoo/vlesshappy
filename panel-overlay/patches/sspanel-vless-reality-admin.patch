@@ -1,41 +1,33 @@
 diff --git a/app/Controllers/Admin/NodeController.php b/app/Controllers/Admin/NodeController.php
 --- a/app/Controllers/Admin/NodeController.php
 +++ b/app/Controllers/Admin/NodeController.php
-@@ -5,10 +5,12 @@ namespace App\Controllers\Admin;
- use App\Models\Node;
-+use App\Models\VlessRealityNodeConfig;
- use App\Utils\Radius;
- use App\Utils\Telegram;
- use App\Utils\Tools;
- use App\Controllers\AdminController;
- use App\Utils\CloudflareDriver;
+@@ -10,4 +10,5 @@ use App\Utils\CloudflareDriver;
  use App\Services\Config;
  use App\Services\SS2022;
 +use App\Services\VlessReality;
  use InvalidArgumentException;
  use Ozdemir\Datatables\Datatables;
-@@ -37,5 +39,7 @@ class NodeController extends AdminController
+@@ -37,5 +38,6 @@ class NodeController extends AdminController
  
      public function create($request, $response, $args)
      {
 -        return $this->view()->display('admin/node/create.tpl');
-+        return $this->view()
-+            ->assign('vless_config', new VlessRealityNodeConfig())
++        return $this->view()->assign('vless_config', VlessReality::emptyConfig())
 +            ->display('admin/node/create.tpl');
      }
-@@ -69,6 +73,20 @@ class NodeController extends AdminController
+@@ -69,6 +72,20 @@ class NodeController extends AdminController
              $node->custom_rss = 0;
              $node->mu_only = 1;
          }
 +        if ((int)$node->sort === VlessReality::NODE_SORT) {
 +            try {
 +                $vlessConfig = VlessReality::requestConfig($request);
++                $node->server = VlessReality::encodeServer($vlessConfig);
 +            } catch (InvalidArgumentException $exception) {
 +                $rs['ret'] = 0;
 +                $rs['msg'] = $exception->getMessage();
 +                return $response->getBody()->write(json_encode($rs));
 +            }
-+            $node->server = $vlessConfig['public_host'] . ';' . $vlessConfig['public_port'];
 +            $node->method = 'vless';
 +            $node->custom_method = 0;
 +            $node->custom_rss = 0;
@@ -44,50 +36,42 @@ diff --git a/app/Controllers/Admin/NodeController.php b/app/Controllers/Admin/No
  
          $req_node_ip = trim($request->getParam('node_ip'));
          if ($req_node_ip == '') {
-@@ -76,7 +96,7 @@ class NodeController extends AdminController
-             $req_node_ip = $server_list[0];
+@@ -76,5 +93,5 @@ class NodeController extends AdminController
          }
  
 -        if (in_array($node->sort, array(0, 1, 10, 11, 12, 13, 14))) {
 +        if (in_array($node->sort, array(0, 1, 10, 11, 12, 13, 14, 15))) {
              $server_list = explode(';', $node->server);
              if (!Tools::is_ip($server_list[0])) {
-                 $node->node_ip = gethostbyname($server_list[0]);
-@@ -100,6 +120,9 @@ class NodeController extends AdminController
-         $node->bandwidthlimit_resetday = $request->getParam('bandwidthlimit_resetday');
- 
-         $node->save();
-+        if (isset($vlessConfig)) {
-+            VlessReality::saveConfig($node->id, $vlessConfig);
-+        }
- 
-         $server_host = isset($ss2022Server) ? $ss2022Server['host'] : explode(';', $node->server)[0];
-         $domain_name = explode('.' . Config::get('cloudflare_name'), $server_host);
-@@ -118,5 +141,10 @@ class NodeController extends AdminController
+@@ -118,5 +135,14 @@ class NodeController extends AdminController
      {
          $id = $args['id'];
          $node = Node::find($id);
 -        return $this->view()->assign('node', $node)->display('admin/node/edit.tpl');
-+        $vlessConfig = VlessRealityNodeConfig::find($id);
-+        if ($vlessConfig === null) {
-+            $vlessConfig = new VlessRealityNodeConfig();
++        $vlessConfig = VlessReality::emptyConfig();
++        if ((int)$node->sort === VlessReality::NODE_SORT) {
++            try {
++                $vlessConfig = VlessReality::configForNode($node);
++            } catch (InvalidArgumentException $exception) {
++                // Keep the editor usable so the malformed node can be repaired.
++            }
 +        }
 +        return $this->view()->assign('node', $node)
 +            ->assign('vless_config', $vlessConfig)->display('admin/node/edit.tpl');
      }
-@@ -152,6 +180,20 @@ class NodeController extends AdminController
+@@ -152,6 +178,20 @@ class NodeController extends AdminController
              $node->custom_rss = 0;
              $node->mu_only = 1;
          }
 +        if ((int)$node->sort === VlessReality::NODE_SORT) {
 +            try {
 +                $vlessConfig = VlessReality::requestConfig($request);
++                $node->server = VlessReality::encodeServer($vlessConfig);
 +            } catch (InvalidArgumentException $exception) {
 +                $rs['ret'] = 0;
 +                $rs['msg'] = $exception->getMessage();
 +                return $response->getBody()->write(json_encode($rs));
 +            }
-+            $node->server = $vlessConfig['public_host'] . ';' . $vlessConfig['public_port'];
 +            $node->method = 'vless';
 +            $node->custom_method = 0;
 +            $node->custom_rss = 0;
@@ -96,34 +80,22 @@ diff --git a/app/Controllers/Admin/NodeController.php b/app/Controllers/Admin/No
  
          $req_node_ip = trim($request->getParam('node_ip'));
          if ($req_node_ip == '') {
-@@ -160,7 +204,7 @@ class NodeController extends AdminController
-         }
+@@ -160,5 +200,5 @@ class NodeController extends AdminController
  
          $success = true;
 -        if (in_array($node->sort, array(0, 1, 10, 11, 12, 13, 14))) {
 +        if (in_array($node->sort, array(0, 1, 10, 11, 12, 13, 14, 15))) {
              $server_list = explode(';', $node->server);
              if (!Tools::is_ip($server_list[0])) {
-                 $success = $node->changeNodeIp($server_list[0]);
-@@ -198,5 +242,10 @@ class NodeController extends AdminController
-         $node->bandwidthlimit_resetday = $request->getParam('bandwidthlimit_resetday');
- 
-         $node->save();
-+        if (isset($vlessConfig)) {
-+            VlessReality::saveConfig($node->id, $vlessConfig);
-+        } else {
-+            VlessReality::deleteConfig($node->id);
-+        }
- 
-         Telegram::Send('节点信息被修改~' . $request->getParam('name'));
-@@ -222,6 +271,7 @@ class NodeController extends AdminController
-             return $response->getBody()->write(json_encode($rs));
-         }
- 
-+        VlessReality::deleteConfig($id);
-         Telegram::Send('节点被删除~' . $name);
- 
-         $rs['ret'] = 1;
+@@ -301,5 +341,8 @@ class NodeController extends AdminController
+                 case 14:
+                     $sort = 'Shadowsocks 2022 - 单端口多用户';
+                     break;
++                case 15:
++                    $sort = 'VLESS REALITY - 单端口多用户';
++                    break;
+                 default:
+                     $sort = '系统保留';
 diff --git a/resources/views/material/admin/node/create.tpl b/resources/views/material/admin/node/create.tpl
 --- a/resources/views/material/admin/node/create.tpl
 +++ b/resources/views/material/admin/node/create.tpl

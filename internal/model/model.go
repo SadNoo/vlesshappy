@@ -11,26 +11,26 @@ import (
 )
 
 type Node struct {
-	ID                   int64   `json:"id"`
-	Name                 string  `json:"name"`
-	TrafficRate          float64 `json:"traffic_rate"`
-	Class                int     `json:"class"`
-	Group                int     `json:"group"`
-	SpeedLimitMbps       float64 `json:"speed_limit_mbps"`
-	ConnectorLimit       int     `json:"connector_limit"`
-	Bandwidth            int64   `json:"-"`
-	BandwidthLimit       int64   `json:"-"`
-	PublicHost           string  `json:"public_host"`
-	PublicPort           int     `json:"public_port"`
-	ServerName           string  `json:"server_name"`
-	Target               string  `json:"target"`
-	RealityPublicKey     string  `json:"reality_public_key"`
-	ShortID              string  `json:"short_id"`
-	Fingerprint          string  `json:"fingerprint"`
-	Flow                 string  `json:"flow"`
-	Transport            string  `json:"transport"`
-	MinClientVersion     string  `json:"min_client_version"`
-	ConfigurationVersion uint64  `json:"configuration_version"`
+	ID               int64   `json:"id"`
+	Name             string  `json:"name"`
+	TrafficRate      float64 `json:"traffic_rate"`
+	Class            int     `json:"class"`
+	Group            int     `json:"group"`
+	SpeedLimitMbps   float64 `json:"speed_limit_mbps"`
+	ConnectorLimit   int     `json:"connector_limit"`
+	Bandwidth        int64   `json:"-"`
+	BandwidthLimit   int64   `json:"-"`
+	PublicHost       string  `json:"public_host"`
+	PublicPort       int     `json:"public_port"`
+	ServerName       string  `json:"server_name"`
+	Target           string  `json:"target"`
+	ManagedCaddy     bool    `json:"managed_caddy"`
+	RealityPublicKey string  `json:"reality_public_key"`
+	ShortID          string  `json:"short_id"`
+	Fingerprint      string  `json:"fingerprint"`
+	Flow             string  `json:"flow"`
+	Transport        string  `json:"transport"`
+	MinClientVersion string  `json:"min_client_version"`
 }
 
 type User struct {

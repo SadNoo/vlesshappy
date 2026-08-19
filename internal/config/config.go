@@ -20,7 +20,6 @@ const (
 	defaultReport      = 60
 	defaultAuthStale   = 3600
 	defaultShutdown    = 120
-	defaultOutboxBytes = 1 << 30
 	defaultTCPUser     = 800
 	defaultTCPGlobal   = 3000
 	defaultHandshakes  = 1024
@@ -33,11 +32,11 @@ type Config struct {
 	NodeID                int64          `json:"node_id"`
 	Listen                string         `json:"listen"`
 	StateDir              string         `json:"state_dir"`
+	CaddyDir              string         `json:"caddy_dir"`
 	RealityPrivateKeyFile string         `json:"reality_private_key_file"`
 	Database              DatabaseConfig `json:"database"`
 	Intervals             Intervals      `json:"intervals"`
 	Limits                Limits         `json:"limits"`
-	OutboxMaxBytes        int64          `json:"outbox_max_bytes"`
 	LogLevel              string         `json:"log_level"`
 }
 
@@ -175,9 +174,6 @@ func (c *Config) defaults() {
 	if c.Intervals.ShutdownSeconds == 0 {
 		c.Intervals.ShutdownSeconds = defaultShutdown
 	}
-	if c.OutboxMaxBytes == 0 {
-		c.OutboxMaxBytes = defaultOutboxBytes
-	}
 	if c.Limits.TCPPerUser == 0 {
 		c.Limits.TCPPerUser = defaultTCPUser
 	}
@@ -217,6 +213,11 @@ func (c Config) Validate() error {
 	if err := absolutePath("state_dir", c.StateDir); err != nil {
 		return err
 	}
+	if c.CaddyDir != "" {
+		if err := absolutePath("caddy_dir", c.CaddyDir); err != nil {
+			return err
+		}
+	}
 	if err := absolutePath("reality_private_key_file", c.RealityPrivateKeyFile); err != nil {
 		return err
 	}
@@ -255,9 +256,6 @@ func (c Config) Validate() error {
 	}
 	if c.Intervals.AuthStaleSeconds < c.Intervals.AuthRefreshSeconds || c.Intervals.ShutdownSeconds < 1 {
 		return errors.New("auth_stale_seconds or shutdown_seconds is invalid")
-	}
-	if c.OutboxMaxBytes < 1<<20 {
-		return errors.New("outbox_max_bytes must be at least 1 MiB")
 	}
 	if c.Limits.TCPPerUser < 1 || c.Limits.TCPGlobal < c.Limits.TCPPerUser ||
 		c.Limits.ConcurrentHandshakes < 1 || c.Limits.XUDPPerUser < 1 ||

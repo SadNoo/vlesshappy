@@ -2,7 +2,7 @@
     <div class="card-main">
         <div class="card-inner">
             <h3>VLESS REALITY（仅节点类型 15 使用）</h3>
-            <p class="form-control-guide"><i class="material-icons">security</i>这里只保存公开材料；REALITY 私钥必须只保存在节点 secret 文件。</p>
+            <p class="form-control-guide"><i class="material-icons">security</i>这里只保存公开材料；提交后由面板编码进 ss_node.server，不新增数据库表。REALITY 私钥必须只保存在节点 secret 文件。</p>
 
             <div class="form-group form-group-label">
                 <label class="floating-label" for="vless_public_host">公开地址</label>
