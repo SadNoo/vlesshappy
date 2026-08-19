@@ -12,13 +12,13 @@ const testPublicKey = "jUOUBrUHcUWzzDhp4L-6l3OwfjUhOajm8Y6yL6jU1zA"
 
 func TestParseVLESSServer(t *testing.T) {
 	var node model.Node
-	raw := "node.example.com;443;0;tcp;reality;sni=www.example.com|pbk=" + testPublicKey + "|sid=0123456789abcdef|target=www.example.com:443|minver=1.8.0"
+	raw := "node.example.com;2053;0;tcp;reality;sni=www.example.com|pbk=" + testPublicKey + "|sid=0123456789abcdef|minver=1.8.0"
 	if err := parseVLESSServer(raw, &node); err != nil {
 		t.Fatal(err)
 	}
-	if node.PublicHost != "node.example.com" || node.PublicPort != 443 ||
+	if node.PublicHost != "node.example.com" || node.PublicPort != 2053 ||
 		node.ServerName != "www.example.com" || node.RealityPublicKey != testPublicKey ||
-		node.ShortID != "0123456789abcdef" || node.Target != "www.example.com:443" ||
+		node.ShortID != "0123456789abcdef" || node.Target != "127.0.0.1:9443" || !node.ManagedCaddy ||
 		node.MinClientVersion != "1.8.0" || node.Flow != "xtls-rprx-vision" ||
 		node.Fingerprint != "chrome" || node.Transport != "raw" {
 		t.Fatalf("unexpected node: %#v", node)
@@ -30,13 +30,25 @@ func TestParseVLESSServer(t *testing.T) {
 	}
 }
 
+func TestParseVLESSServerKeepsLegacyTarget(t *testing.T) {
+	var node model.Node
+	raw := "node.example.com;443;0;tcp;reality;sni=www.example.com|pbk=" + testPublicKey + "|sid=|target=www.example.com:443"
+	if err := parseVLESSServer(raw, &node); err != nil {
+		t.Fatal(err)
+	}
+	if node.Target != "www.example.com:443" || node.ManagedCaddy {
+		t.Fatalf("unexpected legacy node: %#v", node)
+	}
+}
+
 func TestParseVLESSServerRejectsInvalidInput(t *testing.T) {
-	valid := "node.example.com;443;0;tcp;reality;sni=www.example.com|pbk=" + testPublicKey + "|sid=|target=www.example.com:443"
+	valid := "node.example.com;443;0;tcp;reality;sni=www.example.com|pbk=" + testPublicKey + "|sid="
 	for _, raw := range []string{
 		"node.example.com;443",
 		strings.Replace(valid, ";tcp;", ";ws;", 1),
 		valid + "|unknown=value",
-		strings.Replace(valid, "|target=", "|sni=duplicate|target=", 1),
+		valid + "|sni=duplicate",
+		valid + "|target=",
 		strings.Repeat("a", 256),
 	} {
 		var node model.Node

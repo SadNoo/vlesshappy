@@ -30,12 +30,19 @@ node_bandwidth_limit = 0 或 node_bandwidth < node_bandwidth_limit
 public-host;public-port;0;tcp;reality;sni=<SNI>|pbk=<PUBLIC_KEY>|sid=<SHORT_ID>|target=<HOST:PORT>|minver=<VERSION>
 ```
 
+2.2 受管 Caddy 节点使用：
+
+```text
+public-host;public-port;0;tcp;reality;sni=<SNI>|pbk=<PUBLIC_KEY>|sid=<SHORT_ID>|minver=<VERSION>
+```
+
 约束：
 
 - 完整字符串 1..255 字节；
 - 必须恰好六个分号字段；
 - 第三至第五字段固定为 `0;tcp;reality`；
-- `sni`、`pbk`、`sid`、`target` 必须存在，`minver` 可省略；
+- `sni`、`pbk`、`sid` 必须存在，`minver` 可省略；
+- 省略 `target` 表示2.2受管 Caddy，后端固定为 `127.0.0.1:9443`；带 `target` 的旧格式只能与未配置 `caddy_dir` 的手工兼容模式配合；
 - 选项不可重复，不接受未知选项；
 - 公钥是 32 字节无填充 Base64URL；
 - short ID 是最多 16 位的偶数长度十六进制，可为空；

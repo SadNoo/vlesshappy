@@ -1,8 +1,41 @@
 # 09. 构建、安装与运行
 
-## 2.1 推荐入口
+## 2.2 推荐入口
 
-2.1 首次部署优先使用镜像内置向导；详细流程和数据卷内容见 [19-vle-2.1-secure-setup.md](19-vle-2.1-secure-setup.md)。向导只接收 SNI/target，不自动申请域名、部署伪装站点或推荐第三方 target。
+2.2 内置 Caddy并固定 REALITY target。管理员先为 SNI创建指向节点或中转入口的 DNS记录，确保公网 TCP/80 最终到达节点容器 8080，然后运行：
+
+```bash
+docker volume create vle-node-data
+docker run --rm -it --read-only -v vle-node-data:/data sadno/vle:2.2 setup
+```
+
+向导生成的面板字符串不包含 `target`：
+
+```text
+public-host;public-port;0;tcp;reality;sni=...|pbk=...|sid=...
+```
+
+公网 VLESS端口为2053时，正式运行至少映射：
+
+```bash
+docker run -d \
+  --name vle-node \
+  --restart unless-stopped \
+  --stop-timeout 120 \
+  --read-only \
+  --cap-drop ALL \
+  --security-opt no-new-privileges \
+  -p 80:8080/tcp \
+  -p 2053:8443/tcp \
+  -v vle-node-data:/data \
+  sadno/vle:2.2
+```
+
+80只用于 ACME HTTP-01；2053可替换为任意未占用且非80的公网 TCP端口。Caddy HTTPS不发布，REALITY在容器内部转发到 `127.0.0.1:9443`。如果SNI解析到中转IP，中转还必须把 TCP/80原样转发到节点的80入口。
+
+## 2.1 兼容入口
+
+2.1 首次部署流程继续记录在 [19-vle-2.1-secure-setup.md](19-vle-2.1-secure-setup.md)。它仍要求面板字符串带 `target=`，不启用 Caddy。
 
 ```bash
 docker volume create vle-node-data
@@ -39,6 +72,8 @@ vless_traffic_batches
 ```text
 public-host;public-port;0;tcp;reality;sni=...|pbk=...|sid=...|target=...|minver=...
 ```
+
+2.2 受管模式删除 `target=`；面板 overlay 需按单独交付移除该输入和必填校验。后端仍兼容旧字符串，但旧字符串必须使用没有 `caddy_dir` 的手工运行配置。
 
 不要手工把 REALITY 私钥放入该字段。私钥只在节点生成：
 

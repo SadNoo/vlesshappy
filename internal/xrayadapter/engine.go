@@ -249,6 +249,7 @@ func memoryUser(node model.Node, user model.User) (*protocol.MemoryUser, error) 
 
 func dataPlaneNodeEqual(left, right model.Node) bool {
 	return left.ID == right.ID && left.TrafficRate == right.TrafficRate && left.ServerName == right.ServerName && left.Target == right.Target &&
+		left.ManagedCaddy == right.ManagedCaddy &&
 		left.RealityPublicKey == right.RealityPublicKey && left.ShortID == right.ShortID &&
 		left.Fingerprint == right.Fingerprint && left.Flow == right.Flow && left.Transport == right.Transport &&
 		left.MinClientVersion == right.MinClientVersion

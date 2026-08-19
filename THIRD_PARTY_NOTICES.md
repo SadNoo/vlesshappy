@@ -12,3 +12,9 @@ The MySQL connection uses [go-sql-driver/mysql](https://github.com/go-sql-driver
 
 Transitive dependency versions and checksums are fixed by `go.mod`, `go.sum`
 and `vendor/modules.txt`; dependency license files remain in `vendor/`.
+
+The 2.2 container includes [Caddy](https://github.com/caddyserver/caddy)
+`v2.11.4`, copied from the pinned Docker Official Image
+`caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648`.
+Caddy is licensed under Apache License 2.0 and is used only for the local
+managed HTTPS fallback and ACME HTTP-01 certificate lifecycle.

@@ -24,6 +24,7 @@ type Node struct {
 	PublicPort       int     `json:"public_port"`
 	ServerName       string  `json:"server_name"`
 	Target           string  `json:"target"`
+	ManagedCaddy     bool    `json:"managed_caddy"`
 	RealityPublicKey string  `json:"reality_public_key"`
 	ShortID          string  `json:"short_id"`
 	Fingerprint      string  `json:"fingerprint"`

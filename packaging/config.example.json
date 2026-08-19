@@ -2,6 +2,7 @@
   "node_id": 15,
   "listen": "0.0.0.0:8443",
   "state_dir": "/var/lib/vlesshappy",
+  "caddy_dir": "/var/lib/vlesshappy/caddy",
   "reality_private_key_file": "/run/secrets/vlesshappy_reality_private_key",
   "database": {
     "address": "db.example.com:3306",

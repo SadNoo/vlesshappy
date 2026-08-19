@@ -1,13 +1,15 @@
 # vlesshappy
 
-- 状态：`2.1.0 LOCAL IMAGE VALIDATED / SNI 与 TARGET 待单独确认`
+- 状态：`2.2.0 VALIDATED / PUBLIC ACME DOMAIN TEST PENDING`
 - 文档基线日期：`2026-08-19`
-- 实施版本：`2.1.0`
+- 实施版本：`2.2.0`
 - 对应远程仓库：`https://github.com/SadNoo/vlesshappy`
 
 `vlesshappy` 是 VLESS + RAW/TCP + REALITY + Vision + XUDP 多用户单端口后端，直接兼容本项目的 SSPanel 用户、节点、策略、倍率计费和状态表。2.0 按现有 V2 后端的数据库模式运行，不新增表、不修改现有表。
 
 2.1 在不改变协议、数据库或秘密边界的前提下增加镜像内置 `setup` 向导。首次部署使用 Docker 命名卷，向导隐藏读取数据库密码、生成 REALITY 密钥与 short ID、等待管理员保存面板节点、完成严格校验后原子生成运行目录；不再要求手写 JSON、宿主机 secret 文件或 UID 权限。
+
+2.2 为省略 `target` 的新节点格式内置固定 Caddy 2.11.4：后端只把未认证 REALITY 流量转发到容器内 `127.0.0.1:9443`，Caddy 根据面板 `sni` 通过外部 TCP/80 到容器 8080 的 HTTP-01 自动申请和续期证书。VLESS 仍监听容器 8443，由管理员映射任意非 80 的公网 TCP 端口；中转节点只需把订阅公开地址/端口指向纯 TCP 入口。
 
 ## 已实现
 
@@ -24,8 +26,9 @@
 - REALITY 私钥与数据库密码 secret 文件、严格配置、密钥配对检查；
 - 独立 `?vless=1` 与第一方混合 `links`/`mihomo` overlay；`mu=2`/`mu=4` 不注入 VLESS；
 - 非 root、无 shell 的 scratch 容器构建。
+- Caddy HTTPS 只监听 loopback，ACME HTTP-01 单独监听 8080；证书、ACME 账户和站点数据只保存在命名卷；
 
-## 后续验收入口（完整门禁尚未执行）
+## 验收入口
 
 ```bash
 cd vlesshappy
@@ -85,6 +88,8 @@ sh panel-overlay/apply.sh --check
 19. [18-vle-2.0-v2-compatible-mode.md](docs/18-vle-2.0-v2-compatible-mode.md)：2.0 改造、SSPanel 文件清单、数据库边界和验收结果。
 20. [19-vle-2.1-secure-setup.md](docs/19-vle-2.1-secure-setup.md)：2.1 内置初始化向导、命名卷内容、部署和回滚边界。
 21. [20-vle-2.1-validation.md](docs/20-vle-2.1-validation.md)：2.1 测试、Docker 端到端、镜像内容和敏感信息检查记录。
-22. [REFERENCES.md](docs/REFERENCES.md)：父项目代码依据和上游官方资料。
+22. [21-vle-2.2-managed-caddy.md](docs/21-vle-2.2-managed-caddy.md)：2.2 固定 target、Caddy、非 443 公网端口和中转部署合同。
+23. [22-vle-2.2-validation.md](docs/22-vle-2.2-validation.md)：2.2 测试、镜像、敏感信息和发布验证记录。
+24. [REFERENCES.md](docs/REFERENCES.md)：父项目代码依据和上游官方资料。
 
 2.0 的 V2 兼容数据库模式已由项目负责人确认。面板实际文件仍需在部署前按 overlay 清单合并；2.0 没有数据库迁移。

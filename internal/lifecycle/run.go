@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/SadNoo/vlesshappy/internal/accounting"
+	"github.com/SadNoo/vlesshappy/internal/caddyservice"
 	"github.com/SadNoo/vlesshappy/internal/config"
 	"github.com/SadNoo/vlesshappy/internal/database"
 	"github.com/SadNoo/vlesshappy/internal/model"
@@ -23,6 +24,7 @@ type runtimeState struct {
 	cfg          config.Config
 	db           *database.DB
 	engine       *xrayadapter.Engine
+	caddy        *caddyservice.Process
 	privateKey   []byte
 	started      time.Time
 	lastAuth     time.Time
@@ -49,6 +51,13 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		select {
 		case <-ctx.Done():
 			runErr = ctx.Err()
+		case <-state.caddyDone():
+			runErr = state.caddy.Err()
+			if runErr == nil {
+				runErr = errors.New("Caddy stopped unexpectedly")
+			} else {
+				runErr = fmt.Errorf("Caddy stopped unexpectedly: %w", runErr)
+			}
 		case <-reportTicker.C:
 			runErr = state.report(ctx)
 		case <-authTicker.C:
@@ -92,6 +101,9 @@ func ValidateSnapshot(ctx context.Context, cfg config.Config) (model.Snapshot, e
 	}
 	snapshot, _, err := db.LoadSnapshot(checkCtx, cfg.NodeID)
 	if err != nil {
+		return empty, err
+	}
+	if err := validateCaddyContract(cfg, snapshot.Node); err != nil {
 		return empty, err
 	}
 	if _, err := xrayadapter.BuildConfig(snapshot, cfg.Listen, privateKey); err != nil {
@@ -140,8 +152,28 @@ func bootstrap(ctx context.Context, cfg config.Config, logger *slog.Logger) (*ru
 	for _, warning := range warnings {
 		logger.Warn("user isolated", "component", "auth", "event", "invalid_user", "detail", warning, "node_id", cfg.NodeID)
 	}
+	if err := validateCaddyContract(cfg, snapshot.Node); err != nil {
+		db.Close()
+		return fail(err)
+	}
+	if snapshot.Node.ManagedCaddy {
+		caddy, err := caddyservice.Start(ctx, caddyservice.Options{
+			Dir: cfg.CaddyDir, ServerName: snapshot.Node.ServerName,
+		})
+		if err != nil {
+			db.Close()
+			return fail(err)
+		}
+		state.caddy = caddy
+		logger.Info("Caddy certificate ready", "component", "caddy", "event", "ready", "server_name", snapshot.Node.ServerName, "node_id", cfg.NodeID)
+	}
 	engine, err := xrayadapter.Start(snapshot, cfg, privateKey)
 	if err != nil {
+		if state.caddy != nil {
+			stopCtx, stop := context.WithTimeout(context.Background(), 10*time.Second)
+			_ = state.caddy.Stop(stopCtx)
+			stop()
+		}
 		db.Close()
 		return fail(err)
 	}
@@ -207,6 +239,9 @@ func (s *runtimeState) refresh(ctx context.Context) error {
 
 func (s *runtimeState) reload(ctx context.Context, next model.Snapshot) error {
 	previous := s.engine.Snapshot()
+	if s.caddy != nil && previous.Node.ServerName != next.Node.ServerName {
+		return errors.New("managed Caddy SNI changed; restart the container after DNS is ready")
+	}
 	if s.engine.CanApply(next) {
 		entries, err := s.engine.Drain()
 		if err != nil {
@@ -261,7 +296,29 @@ func (s *runtimeState) shutdown(ctx context.Context) error {
 	snapshot := s.engine.Snapshot()
 	entries, closeErr := s.engine.CloseAndDrain()
 	reportErr := s.applyTraffic(ctx, entries, snapshot)
-	return errors.Join(closeErr, reportErr)
+	var caddyErr error
+	if s.caddy != nil {
+		caddyErr = s.caddy.Stop(ctx)
+	}
+	return errors.Join(closeErr, reportErr, caddyErr)
+}
+
+func (s *runtimeState) caddyDone() <-chan struct{} {
+	if s == nil || s.caddy == nil {
+		return nil
+	}
+	return s.caddy.Done()
+}
+
+func validateCaddyContract(cfg config.Config, node model.Node) error {
+	managed := cfg.CaddyDir != ""
+	if managed != node.ManagedCaddy {
+		if managed {
+			return errors.New("caddy_dir requires an ss_node.server without target=")
+		}
+		return errors.New("ss_node.server without target= requires caddy_dir")
+	}
+	return nil
 }
 
 func systemLoad(metrics sessionregistry.Metrics) string {

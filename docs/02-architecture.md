@@ -4,7 +4,8 @@
 
 ```text
 客户端 -> VLESS/REALITY 数据面 -> 目标 TCP/XUDP
-                    |
+                    |    |
+                    |    +-> 未认证连接 -> 127.0.0.1:9443 Caddy
 SSPanel -> MySQL <- vlesshappy 控制面
 ```
 
@@ -35,7 +36,13 @@ SSPanel -> MySQL <- vlesshappy 控制面
 public-host;public-port;0;tcp;reality;sni=...|pbk=...|sid=...|target=...|minver=...
 ```
 
-`chrome`、`xtls-rprx-vision` 和 `raw` 是固定值。完整字符串最多 255 字节，未知、重复或缺失选项均拒绝。
+2.2 新节点格式省略 `target`：
+
+```text
+public-host;public-port;0;tcp;reality;sni=...|pbk=...|sid=...|minver=...
+```
+
+省略时后端固定使用 `127.0.0.1:9443` 并要求配置 `caddy_dir`。带 `target=` 的2.0/2.1字符串仅作为不启用 Caddy 的手工兼容模式保留。`chrome`、`xtls-rprx-vision` 和 `raw` 是固定值。完整字符串最多255字节，未知、重复或缺失公开选项均拒绝。
 
 ### 授权与数据面
 

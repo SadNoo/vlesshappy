@@ -11,9 +11,13 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -mod=vendor \
     -trimpath -ldflags="-s -w -buildid=" -o /out/vlesshappy ./cmd/vlesshappy
 RUN mkdir -p /out/data && chmod 0700 /out/data
 
+FROM --platform=$TARGETPLATFORM caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648 AS caddy
+RUN setcap -r /usr/bin/caddy
+
 FROM scratch
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /out/vlesshappy /vlesshappy
+COPY --from=caddy /usr/bin/caddy /caddy
 COPY --from=build --chown=65532:65532 /out/data /data
 USER 65532:65532
 VOLUME ["/data"]

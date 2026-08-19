@@ -21,6 +21,14 @@
 public-host;public-port;0;tcp;reality;sni=...|pbk=...|sid=...|target=...|minver=...
 ```
 
+上式是2.0/2.1历史合同。2.2受管 Caddy overlay应改为：
+
+```text
+public-host;public-port;0;tcp;reality;sni=...|pbk=...|sid=...|minver=...
+```
+
+管理员表单不再显示或保存 `vless_target`；现有 `target=` 节点只有在后端手工配置未设置 `caddy_dir` 时继续兼容。2.2面板文件仍按项目负责人要求单独交付，不进入后端镜像或本轮 Git提交。
+
 面板负责在 255 字节以内编码和校验，后端使用同一严格合同解析。不增加 VLESS Model 或专用表。
 
 最终集成至少需要项目负责人提供 LinkController、第一方 ClientConfig/API、Node/User 控制器、用户模板和管理员节点页面的实际版本。收到前不推测文件结构、不写父项目。

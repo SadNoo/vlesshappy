@@ -21,6 +21,7 @@ import (
 	gomysql "github.com/go-sql-driver/mysql"
 
 	"github.com/SadNoo/vlesshappy/internal/accounting"
+	"github.com/SadNoo/vlesshappy/internal/caddyservice"
 	"github.com/SadNoo/vlesshappy/internal/config"
 	"github.com/SadNoo/vlesshappy/internal/model"
 	"github.com/SadNoo/vlesshappy/internal/policy"
@@ -257,7 +258,7 @@ func parseVLESSServer(server string, node *model.Node) error {
 		}
 		options[key] = strings.TrimSpace(pair[1])
 	}
-	for _, required := range []string{"sni", "pbk", "sid", "target"} {
+	for _, required := range []string{"sni", "pbk", "sid"} {
 		if _, exists := options[required]; !exists {
 			return fmt.Errorf("missing option %q", required)
 		}
@@ -267,7 +268,12 @@ func parseVLESSServer(server string, node *model.Node) error {
 	node.ServerName = options["sni"]
 	node.RealityPublicKey = options["pbk"]
 	node.ShortID = strings.ToLower(options["sid"])
-	node.Target = options["target"]
+	node.Target, node.ManagedCaddy = options["target"], false
+	if _, exists := options["target"]; !exists {
+		node.Target, node.ManagedCaddy = caddyservice.RealityTarget, true
+	} else if node.Target == "" {
+		return errors.New("target must not be empty when present")
+	}
 	node.MinClientVersion = options["minver"]
 	node.Fingerprint = "chrome"
 	node.Flow = "xtls-rprx-vision"

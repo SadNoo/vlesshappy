@@ -26,7 +26,7 @@ func TestRunCreatesValidatedRuntimeWithoutLeakingSecrets(t *testing.T) {
 	dataDir := t.TempDir()
 	seed := bytes.Repeat([]byte{0x42}, 80)
 	input := strings.NewReader(strings.Join([]string{
-		"node.example.com", "2053", "decoy.example.net", "",
+		"node.example.com", "2053", "decoy.example.net",
 		"db.example.com:3306", "", "vlesshappy", "disabled", "123", "",
 	}, "\n"))
 	var output bytes.Buffer
@@ -66,7 +66,7 @@ func TestRunCreatesValidatedRuntimeWithoutLeakingSecrets(t *testing.T) {
 			shortID = outputValue(t, output.String(), "REALITY short ID: ")
 			return model.Snapshot{Node: model.Node{
 				PublicHost: "node.example.com", PublicPort: 2053,
-				ServerName: "decoy.example.net", Target: "decoy.example.net:443",
+				ServerName: "decoy.example.net", Target: "127.0.0.1:9443", ManagedCaddy: true,
 				RealityPublicKey: publicKey, ShortID: shortID,
 			}}, nil
 		},
@@ -83,6 +83,7 @@ func TestRunCreatesValidatedRuntimeWithoutLeakingSecrets(t *testing.T) {
 		t.Fatal(err)
 	}
 	if cfg.NodeID != 123 || cfg.StateDir != filepath.Join(runtimeDir, "state") ||
+		cfg.CaddyDir != filepath.Join(runtimeDir, "caddy") ||
 		cfg.Database.PasswordFile != filepath.Join(runtimeDir, "secrets", "vlesshappy_database_password") {
 		t.Fatalf("unexpected final config: %#v", cfg)
 	}
@@ -103,7 +104,10 @@ func TestRunCreatesValidatedRuntimeWithoutLeakingSecrets(t *testing.T) {
 	if strings.Contains(text, "database-test-secret") || strings.Contains(text, privateKey) {
 		t.Fatalf("secret leaked in output: %s", text)
 	}
-	for _, public := range []string{publicKey, shortID, "-p 2053:8443/tcp", "-v test-volume:/data"} {
+	for _, public := range []string{
+		publicKey, shortID, "-p 80:8080/tcp", "-p 2053:8443/tcp", "-v test-volume:/data",
+		"node.example.com;2053;0;tcp;reality;sni=decoy.example.net|pbk=" + publicKey + "|sid=" + shortID,
+	} {
 		if !strings.Contains(text, public) {
 			t.Fatalf("missing public output %q in %s", public, text)
 		}
@@ -129,7 +133,7 @@ func outputValue(t *testing.T, output, prefix string) string {
 func TestRunDoesNotCommitFailedValidation(t *testing.T) {
 	dataDir := t.TempDir()
 	input := strings.NewReader(strings.Join([]string{
-		"node.example.com", "443", "decoy.example.net", "",
+		"node.example.com", "443", "decoy.example.net",
 		"db.example.com:3306", "sspanel", "vlesshappy", "required", "15", "cancel", "",
 	}, "\n"))
 	err := Run(context.Background(), Options{
@@ -152,11 +156,11 @@ func TestRunDoesNotCommitFailedValidation(t *testing.T) {
 func TestMatchPanelRejectsCopyError(t *testing.T) {
 	answer := answers{
 		publicHost: "node.example.com", publicPort: 443, serverName: "decoy.example.net",
-		target: "decoy.example.net:443", publicKey: "public", shortID: "0123456789abcdef",
+		publicKey: "public", shortID: "0123456789abcdef",
 	}
 	node := model.Node{
 		PublicHost: answer.publicHost, PublicPort: answer.publicPort, ServerName: answer.serverName,
-		Target: answer.target, RealityPublicKey: "different", ShortID: answer.shortID,
+		Target: "127.0.0.1:9443", ManagedCaddy: true, RealityPublicKey: "different", ShortID: answer.shortID,
 	}
 	if err := matchPanel(node, answer); err == nil || !strings.Contains(err.Error(), "public key") {
 		t.Fatalf("unexpected mismatch result: %v", err)
@@ -166,11 +170,11 @@ func TestMatchPanelRejectsCopyError(t *testing.T) {
 func TestValidateUntilReadyRetriesPanelMismatch(t *testing.T) {
 	answer := answers{
 		publicHost: "node.example.com", publicPort: 443, serverName: "decoy.example.net",
-		target: "decoy.example.net:443", publicKey: "public", shortID: "0123456789abcdef",
+		publicKey: "public", shortID: "0123456789abcdef",
 	}
 	valid := model.Node{
 		PublicHost: answer.publicHost, PublicPort: answer.publicPort, ServerName: answer.serverName,
-		Target: answer.target, RealityPublicKey: answer.publicKey, ShortID: answer.shortID,
+		Target: "127.0.0.1:9443", ManagedCaddy: true, RealityPublicKey: answer.publicKey, ShortID: answer.shortID,
 	}
 	calls := 0
 	var output bytes.Buffer
@@ -195,6 +199,9 @@ func TestPrintRunCommandAddsHostGatewayOnlyWhenNeeded(t *testing.T) {
 	var output bytes.Buffer
 	printRunCommand(&output, "vle-data", "vle-node", 8443, "host.docker.internal:3306")
 	if !strings.Contains(output.String(), "--add-host host.docker.internal:host-gateway") {
+		t.Fatal(output.String())
+	}
+	if !strings.Contains(output.String(), "-p 80:8080/tcp") || !strings.Contains(output.String(), "sadno/vle:2.2") {
 		t.Fatal(output.String())
 	}
 	output.Reset()

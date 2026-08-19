@@ -32,6 +32,7 @@ type Config struct {
 	NodeID                int64          `json:"node_id"`
 	Listen                string         `json:"listen"`
 	StateDir              string         `json:"state_dir"`
+	CaddyDir              string         `json:"caddy_dir"`
 	RealityPrivateKeyFile string         `json:"reality_private_key_file"`
 	Database              DatabaseConfig `json:"database"`
 	Intervals             Intervals      `json:"intervals"`
@@ -211,6 +212,11 @@ func (c Config) Validate() error {
 	}
 	if err := absolutePath("state_dir", c.StateDir); err != nil {
 		return err
+	}
+	if c.CaddyDir != "" {
+		if err := absolutePath("caddy_dir", c.CaddyDir); err != nil {
+			return err
+		}
 	}
 	if err := absolutePath("reality_private_key_file", c.RealityPrivateKeyFile); err != nil {
 		return err

@@ -47,7 +47,6 @@ type answers struct {
 	publicHost       string
 	publicPort       int
 	serverName       string
-	target           string
 	databaseAddress  string
 	databaseName     string
 	databaseUsername string
@@ -87,7 +86,7 @@ func Run(ctx context.Context, opts Options) error {
 		return fmt.Errorf("inspect runtime directory: %w", err)
 	}
 
-	fmt.Fprintln(opts.Out, "vlesshappy 2.1 secure setup")
+	fmt.Fprintln(opts.Out, "vlesshappy 2.2 secure setup with managed Caddy")
 	fmt.Fprintln(opts.Out, "No private key or database password will be printed or stored in Docker environment variables.")
 	p := prompt{in: opts.In, out: opts.Out}
 	answer, err := collect(p, opts.ReadPassword, opts.Random)
@@ -100,9 +99,9 @@ func Run(ctx context.Context, opts Options) error {
 	fmt.Fprintf(opts.Out, "public host: %s\n", answer.publicHost)
 	fmt.Fprintf(opts.Out, "public port: %d\n", answer.publicPort)
 	fmt.Fprintf(opts.Out, "REALITY SNI: %s\n", answer.serverName)
-	fmt.Fprintf(opts.Out, "REALITY target: %s\n", answer.target)
 	fmt.Fprintf(opts.Out, "REALITY public key: %s\n", answer.publicKey)
 	fmt.Fprintf(opts.Out, "REALITY short ID: %s\n", answer.shortID)
+	fmt.Fprintf(opts.Out, "ss_node.server: %s\n", serverString(answer))
 	fmt.Fprintln(opts.Out, "minimum client version: leave empty")
 	fmt.Fprintln(opts.Out, "Save the node as enabled sort=15, then enter its ss_node.id below.")
 	answer.nodeID, err = p.positiveInt64("SSPanel node ID")
@@ -207,7 +206,6 @@ func matchPanel(node model.Node, answer answers) error {
 		{"public host", answer.publicHost, node.PublicHost},
 		{"public port", strconv.Itoa(answer.publicPort), strconv.Itoa(node.PublicPort)},
 		{"REALITY SNI", answer.serverName, node.ServerName},
-		{"REALITY target", answer.target, node.Target},
 		{"REALITY public key", answer.publicKey, node.RealityPublicKey},
 		{"REALITY short ID", answer.shortID, node.ShortID},
 	}
@@ -225,13 +223,13 @@ func collect(p prompt, readPassword PasswordReader, random io.Reader) (answers, 
 	if answer.publicHost, err = p.host("Public node address"); err != nil {
 		return answer, err
 	}
-	if answer.publicPort, err = p.port("Public TCP port", 443); err != nil {
+	if answer.publicPort, err = p.port("Public TCP port", 2053); err != nil {
 		return answer, err
+	}
+	if answer.publicPort == 80 {
+		return answer, errors.New("public TCP port 80 is reserved for Caddy certificate issuance")
 	}
 	if answer.serverName, err = p.dnsName("REALITY SNI"); err != nil {
-		return answer, err
-	}
-	if answer.target, err = p.target("REALITY target", net.JoinHostPort(answer.serverName, "443")); err != nil {
 		return answer, err
 	}
 	if answer.databaseAddress, err = p.target("MySQL address", ""); err != nil {
@@ -299,6 +297,9 @@ func stage(stageDir, runtimeDir string, answer answers) (config.Config, config.C
 	if err := os.Mkdir(filepath.Join(stageDir, "state"), 0o700); err != nil {
 		return config.Config{}, config.Config{}, err
 	}
+	if err := os.Mkdir(filepath.Join(stageDir, "caddy"), 0o700); err != nil {
+		return config.Config{}, config.Config{}, err
+	}
 	if err := writeSecret(filepath.Join(stageSecrets, "vlesshappy_reality_private_key"), []byte(answer.privateKey+"\n")); err != nil {
 		return config.Config{}, config.Config{}, err
 	}
@@ -329,6 +330,7 @@ func buildConfig(base string, answer answers) config.Config {
 	return config.Config{
 		NodeID: answer.nodeID, Listen: "0.0.0.0:8443",
 		StateDir:              filepath.Join(base, "state"),
+		CaddyDir:              filepath.Join(base, "caddy"),
 		RealityPrivateKeyFile: filepath.Join(base, "secrets", "vlesshappy_reality_private_key"),
 		Database: config.DatabaseConfig{
 			Address: answer.databaseAddress, Name: answer.databaseName, Username: answer.databaseUsername,
@@ -436,9 +438,15 @@ func printRunCommand(out io.Writer, volumeName, containerName string, publicPort
 	if host, _, err := net.SplitHostPort(databaseAddress); err == nil && host == "host.docker.internal" {
 		fmt.Fprintln(out, "  --add-host host.docker.internal:host-gateway \\")
 	}
+	fmt.Fprintln(out, "  -p 80:8080/tcp \\")
 	fmt.Fprintf(out, "  -p %d:8443/tcp \\\n", publicPort)
 	fmt.Fprintf(out, "  -v %s:/data \\\n", volumeName)
-	fmt.Fprintln(out, "  sadno/vle:2.1")
+	fmt.Fprintln(out, "  sadno/vle:2.2")
+}
+
+func serverString(answer answers) string {
+	return fmt.Sprintf("%s;%d;0;tcp;reality;sni=%s|pbk=%s|sid=%s",
+		answer.publicHost, answer.publicPort, answer.serverName, answer.publicKey, answer.shortID)
 }
 
 func validateDockerName(label, value string) error {

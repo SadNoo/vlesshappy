@@ -17,7 +17,7 @@ import (
 	setupwizard "github.com/SadNoo/vlesshappy/internal/setup"
 )
 
-const version = "2.1.0"
+const version = "2.2.0"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
